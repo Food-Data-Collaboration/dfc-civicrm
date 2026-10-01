@@ -30,9 +30,12 @@ persist.
 
 - [ ] `civix` scaffold generated here
 - [ ] `api-coverage-manifest.yaml` moved in from `../api-coverage-manifest.yaml`
-      and wired to a generator over `DFC-LinkML/config/dfc-original-api.yaml`
-      (the plan requires it to be generated, not hand-maintained; until the
-      generator exists it stays a scaffold that claims no coverage)
+      and wired to a **two-pass** generator: `src/dfc_business_linkml_v2_0.yaml`
+      for resource rows (generated from the OWL ontology, current v2.0.0),
+      `config/dfc-original-api.yaml` for the operations column. The parity map
+      is curated by hand and lags the schema — never use it to decide whether a
+      class exists. Until the generator exists the manifest stays a scaffold that
+      claims no coverage.
 - [ ] `composer.json` dependency on `siol-data/linkml-connector` resolved —
       publish-then-depend, or vendor the tested connector into the release
       archive. Blocked as BLK-004.
