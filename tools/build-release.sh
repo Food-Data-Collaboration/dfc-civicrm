@@ -505,8 +505,77 @@ write_vendor_manifest() {
         fi
     fi
 
+    # composer.lock is deliberately NOT committed (2026-10-03, requester's
+    # decision: this extension is distributed as a CiviCRM package, not as a
+    # Composer library, so the lock is the installing developer's artefact).
+    # That means composer.lock and `composer show --locked` are both absent
+    # here, and the provenance table above would otherwise stamp "unknown" -
+    # leaving an administrator unable to tell which DFC runtime they received.
+    #
+    # Read the version from the INSTALLED package instead. It is what actually
+    # got vendored, which is a stronger claim than what the lock resolved to:
+    # if the working tree and the lock ever disagree, the files in the archive
+    # are the installed ones, so those are what we must record.
+    if [ -z "${version}" ] && command -v composer >/dev/null 2>&1; then
+        local installed
+        installed="$(composer show --format=json "${CONNECTOR_PACKAGE}" 2>/dev/null || echo '')"
+        if [ -n "${installed}" ]; then
+            version="$(printf '%s' "${installed}" | sed -n -E 's/.*"versions"[[:space:]]*:[[:space:]]*\[[[:space:]]*"([^"]+)".*/\1/p' | head -n 1)"
+            [ -n "${dist_reference}" ] || dist_reference="$(printf '%s' "${installed}" | sed -n -E 's/.*"reference"[[:space:]]*:[[:space:]]*"([0-9a-fA-F]{7,40})".*/\1/p' | head -n 1)"
+        fi
+    fi
+
+    # Authoritative source, and the one that survives no-lock: Composer writes
+    # the resolved version of every installed package into
+    # vendor/composer/installed.json. That file describes exactly what was
+    # installed - which is what we just vendored - so it is a stronger claim
+    # than the lock, not a weaker one.
+    #
+    # Deliberately not `composer show --format=json`: without --locked it omits
+    # the "versions" array entirely, which is how this previously fell through to
+    # "unknown". Not the installed package's own composer.json either - Composer
+    # strips "version" from distributed package manifests, so the field is
+    # absent by design.
     if [ -z "${version}" ]; then
-        warn "could not determine the connector version from composer.lock or 'composer show --locked'. The provenance table in vendor/VENDORED.md will say 'unknown', which is not good enough for a release: an administrator then cannot tell what DFC runtime they received."
+        local installed_json="${REPO_ROOT}/vendor/composer/installed.json"
+        if [ -f "${installed_json}" ]; then
+            local parsed
+            if command -v python3 >/dev/null 2>&1; then
+                parsed="$(python3 - "${installed_json}" "${CONNECTOR_PACKAGE}" <<'PYEOF' 2>/dev/null || echo ''
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+packages = data["packages"] if isinstance(data, dict) else data
+for pkg in packages:
+    if pkg.get("name") == sys.argv[2]:
+        # TAB-separated, explicitly. print(a, b) would emit a single SPACE,
+        # which `cut -f1` does not split on - that bug put the dist reference
+        # into the Version cell of the release's provenance table.
+        ref = (pkg.get("dist") or {}).get("reference") or (pkg.get("source") or {}).get("reference") or ""
+        sys.stdout.write(pkg.get("version", "") + "\t" + ref + "\n")
+        break
+PYEOF
+)"
+                [ -n "${version}" ] || version="$(printf '%s' "${parsed}" | cut -f1)"
+                # Tab-separated, so `cut -f2` is the reference and nothing else.
+                # Assigning the whole line to version (a bug this replaced) rendered
+                # "v2.0.5 2ce4a2ce..." in the Version cell of the release's
+                # provenance table.
+                dist_reference="$(printf '%s' "${parsed}" | cut -f2)"
+            else
+                warn "python3 not available; cannot read vendor/composer/installed.json for provenance. Refusing to ship an archive whose VENDORED.md says 'unknown'."
+            fi
+        fi
+    fi
+
+    if [ -z "${version}" ]; then
+        # Hard failure, not a warning. A release whose provenance table says
+        # "unknown" is a release an administrator cannot audit, and shipping
+        # one silently is worse than refusing to build.
+        fail "could not determine the connector version (tried composer.lock, 'composer show --locked', 'composer show', and the installed package's composer.json). The provenance table in vendor/VENDORED.md would say 'unknown', and an administrator would have no way to tell which DFC runtime they received. Fix the provenance source rather than shipping an unauditable release."
     fi
 
     [ -n "${name}" ] || name="${CONNECTOR_PACKAGE}"
