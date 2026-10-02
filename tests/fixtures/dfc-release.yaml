@@ -1,0 +1,105 @@
+# DFC release descriptor — test fixture for Civi\Dfc\V2\Identity\DfcReleaseConfig.
+#
+# ============================================================================
+# PROVENANCE
+# ============================================================================
+# Everything above the `dfc_civicrm:` block below is a faithful mirror of
+# `config/dfc-release.yaml` in the DFC-LinkML repository
+# (Food-Data-Collaboration/DFC-LinkML), whose own header reads:
+#
+#   "DFC release manifest — machine-readable source of truth for SDK generation.
+#    Everything generated in this repo must be reproducible from the pins below.
+#    Bump versions here, then run `make generate`."
+#
+# PRD-002 §5 requires this file to be the source of the DFC version and context
+# namespace and forbids hand-coding them per mapper. This fixture is what proves
+# that plumbing works end to end; the extension's shipped copy is this file with
+# the pins updated at release time.
+#
+# ---------------------------------------------------------------------------
+# WHY THE `dfc_civicrm:` BLOCK EXISTS
+# ---------------------------------------------------------------------------
+# `dfc-release.yaml` does NOT carry the dfc-b: / dfc-t: prefix IRIs. Upstream
+# keeps those in `config/dfc-default.yaml`, under `prefixes:`:
+#
+#   ontology_base: "https://w3id.org/dfc/ontology"
+#   prefixes:
+#     dfc-b: "https://w3id.org/dfc/ontology/src/DFC_BusinessOntology.owl#"
+#     dfc-t: "https://w3id.org/dfc/ontology/src/DFC_TechnicalOntology.owl#"
+#
+# `dfc-default.yaml` is the *schema generator's* input, not a release
+# descriptor, so it is not something a runtime consumer should have to go find.
+# The two prefix values are therefore copied verbatim into an explicitly marked
+# block here, together with the release-scoped ontology distribution base, which
+# also lives in `dfc-default.yaml` as a template ("version is appended as
+# /v{version}/").
+#
+# This is additive: nothing above this block is altered, so a diff between this
+# file and upstream's is only the marked block.
+#
+# ---------------------------------------------------------------------------
+# THE DETAIL THAT MATTERS MOST FOR URI STABILITY
+# ---------------------------------------------------------------------------
+# Note what the prefix IRIs do NOT contain: `/v2.0.0/`. Upstream's prefix IRIs
+# are UNVERSIONED, while the context URL IS versioned. So a DFC version bump
+# changes the `@context` of every document and changes not one `@id`.
+# That is exactly the behaviour DfcReleaseConfig rule R1 depends on, and
+# DfcReleaseConfigTest asserts it.
+
+dfc_ontology_version: "2.0.0"
+dfc_taxonomy_version: "2.0.0"
+
+# SDK version — tracks the DFC major version and is independent of the
+# ontology/taxonomy pins above. Informational for this extension: recorded for
+# provenance in cross-connector compatibility checks (sa-015), never minted
+# into a URI.
+sdk_version: "2.0.4"
+
+ontology:
+  business_url: "https://w3id.org/dfc/ontology/v2.0.0/src/DFC_BusinessOntology.rdf"
+  technical_url: "https://w3id.org/dfc/ontology/v2.0.0/src/DFC_TechnicalOntology.rdf"
+
+taxonomies:
+  base_url: "https://w3id.org/dfc/taxonomies"
+
+schema:
+  file: "src/dfc_business_linkml_v2_0.yaml"
+  config: "config/dfc-default.yaml"
+
+outputs:
+  typescript: "typescript-connector/"
+  ruby: "ruby-gem/"
+  php: "php-connector/"
+
+original_test_versions:
+  typescript: "2.0.0-beta.2"
+  ruby: "2.0.0.pre.beta8"
+
+# ---------------------------------------------------------------------------
+# dfc_civicrm: additions — NOT upstream. See the note above.
+# ---------------------------------------------------------------------------
+
+dfc_civicrm:
+  # Release-scoped ontology distribution base. Template in upstream
+  # config/dfc-default.yaml: "Base URL for versioned ontology files (version is
+  # appended as /v{version}/)". The two ontology documents above live one level
+  # deeper, under src/.
+  ontology_file_base: "https://w3id.org/dfc/ontology/v2.0.0/"
+
+  # Copied verbatim from upstream config/dfc-default.yaml `prefixes:`.
+  # Unversioned on purpose — see the note at the top of this file.
+  prefixes:
+    dfc-b: "https://w3id.org/dfc/ontology/src/DFC_BusinessOntology.owl#"
+    dfc-t: "https://w3id.org/dfc/ontology/src/DFC_TechnicalOntology.owl#"
+
+  # Verbatim from config/dfc-default.yaml, which lists vcard: and linkml:
+  # alongside the two DFC prefixes, with the comment:
+  #   "DFC aligns Agent, Organization, Person and Enterprise with vCard classes
+  #    via owl:equivalentClass. The prefix is needed to render those targets as
+  #    distinguishable CURIEs: vcard:Agent and dfc-b:Agent share a local name."
+  # Recorded for provenance only. No URI in this extension is minted from them,
+  # and DfcReleaseConfig deliberately does not model them: they matter to the
+  # JSON-LD export layer (sa-010), not to the identity layer.
+  other_prefixes:
+    vcard: "http://www.w3.org/2006/vcard/ns#"
+    linkml: "https://w3id.org/linkml/"

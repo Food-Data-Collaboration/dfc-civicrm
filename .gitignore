@@ -1,0 +1,20 @@
+# Composer / dependencies
+/vendor/
+composer.lock
+
+# PHPUnit
+/.phpunit.cache/
+/.phpunit.result.cache
+
+# CiviCRM
+/sites/default/files/civicrm/
+/civicrm.sql
+/civicrm.*.tar.gz
+
+# Local environment - never commit credentials
+/.env
+/.env.local
+
+# OS noise
+.DS_Store
+Thumbs.db

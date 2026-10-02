@@ -1,0 +1,139 @@
+<?xml version="1.0"?>
+<!--
+  CiviCRM extension descriptor for dfc_civicrm.
+
+  Field sources of truth:
+    * key / file   : extension short name. MUST equal the directory name, because
+                     CRM_Extension_Info::parse() reads `key` and `file` off the
+                     root element and CiviCRM resolves the extension from
+                     <ext-dir>/<key>/<file>.php.
+    * name         : the human-readable label. (info.xml has a separate <label>
+                     element, but the schema only allows it for type="search"
+                     extensions - see docs.civicrm.org/.../extensions/info-xml/.)
+    * license      : composer.json "license" (AGPL-3.0-or-later).
+    * type         : composer.json "type" (civicrm-extension) maps to the
+                     CiviCRM extension type "module". Since CiviCRM 6.26 every
+                     extension must be type="module".
+
+  Compatibility floor: 5.74
+    * 5.68  setting-admin@1  (admin settings page + navigation)
+    * 5.71  smarty@1.0.3     (templates/ directory)
+    * 5.73  entity-types-php@2.0.0 (schema/*.entityType.php)
+    * 5.74  hook_civicrm_permission 'implies' / 'implied_by' (see dfc_civicrm.php)
+  A single <ver> implies forward compatibility, so 5.74 covers 5.74+ and all 6.x
+  (docs.civicrm.org/.../extensions/info-xml/ -> <ver>).
+-->
+<extension key="dfc_civicrm" type="module">
+  <file>dfc_civicrm</file>
+  <name>DFC v2 for CiviCRM</name>
+  <description>Exposes the DFC v2 JSON-LD / LDP / WebID HTTP interface from a CiviCRM installation and maps DFC v2 identities and relationships onto native CiviCRM entities.</description>
+  <license>AGPL-3.0-or-later</license>
+  <maintainer>
+    <!-- TODO(sa-007 follow-up): the repository has no remote yet, so the URLs
+         and the maintainer address below are placeholders and must be replaced
+         before any release or Extensions Directory submission (lane-5 / CP-7).
+         `.invalid` is the RFC 2606 reserved TLD: guaranteed non-routable. -->
+    <author>zoro-jiro-san</author>
+    <email>maintainers@zoro-jiro-san.invalid</email>
+  </maintainer>
+  <urls>
+    <url desc="Main Extension Page">https://github.com/zoro-jiro-san/dfc-civicrm</url>
+    <url desc="Source">https://github.com/zoro-jiro-san/dfc-civicrm</url>
+    <url desc="Licensing">https://www.gnu.org/licenses/agpl-3.0.html</url>
+  </urls>
+  <releaseDate>2026-10-01</releaseDate>
+  <!-- SemVer. The docs recommend x.y.z; older x.y forms lose Composer support. -->
+  <version>0.1.0</version>
+  <!-- Not `stable`: PR-002 CR-7/CR-20 are unmet and alpha releases are not
+       accepted by the Extensions Directory. Promote when CP-7 signs off. -->
+  <develStage>alpha</develStage>
+  <compatibility>
+    <ver>5.74</ver>
+  </compatibility>
+  <php_compatibility>
+    <ver>8.1</ver>
+    <ver>8.2</ver>
+    <ver>8.3</ver>
+    <ver>8.4</ver>
+  </php_compatibility>
+  <smarty_compatibility>
+    <ver>5</ver>
+  </smarty_compatibility>
+  <comments>
+    Exposes DFC v2 over HTTP (JSON-LD, LDP containers, WebID/TypeIndex
+    discovery and the DFC Identity Service) and persists DFC semantic
+    identifiers and WebIDs in two extension-owned tables
+    (civicrm_dfc_identity, civicrm_dfc_webid).
+
+    Out of scope, permanently for now: Order, OrderLine and every product
+    class. Those surfaces return a deterministic unsupported-resource error
+    and are never partially persisted.
+
+    Disabling or uninstalling this extension never deletes, merges or hides
+    underlying CiviCRM contacts. Only the extension's own tables and its own
+    managed custom data are affected - see dfc_civicrm_civicrm_uninstall().
+
+    Security: all DFC routes require the "access dfc api" permission, and the
+    public/private export allow-list defaults to not-exported.
+  </comments>
+  <civix>
+    <!-- PSR-0 root for CRM_* classes (the DAOs behind civicrm_dfc_identity and
+         civicrm_dfc_webid). civix reads this to name generated code. -->
+    <namespace>CRM/Dfc</namespace>
+    <!-- Read by the setting-admin@1 mixin for the admin page title. Documented
+         as "experimental" by the mixin itself. -->
+    <setting-page-title>DFC v2 Settings</setting-page-title>
+  </civix>
+  <!--
+    Class-loading rules. CRM_Extension_Info::parse() turns each <psr4>/<psr0>
+    into ['type' => ..., 'prefix' => ..., 'path' => ...] and
+    CRM_Extension_ClassLoader::loadExtension() feeds them to
+    Composer\Autoload\ClassLoader::addPsr4()/add(). Multiple prefixes are fine:
+    Composer tries the longest matching prefix first.
+
+    * Civi\Dfc\   -> the extension's own PSR-4 root. MUST stay identical to
+                     composer.json's autoload.psr-4 so the unit suite and the
+                     runtime see the same class map.
+    * Civi\       -> CiviCRM's own convention for APIv4 entity classes. Needed
+                     for Civi\Api4\DfcIdentity and Civi\Api4\DfcWebId, which
+                     Civi\Api4\Utils\CoreUtil::getApiClass() resolves as
+                     'Civi\Api4\\' . $entityName.
+    * CRM_Dfc_    -> PSR-0 root for the DAO layer (CRM/Dfc/DAO/*.php).
+    * CRM_        -> the standard CiviCRM PSR-0 rule every extension declares.
+  -->
+  <classloader>
+    <psr4 prefix="Civi\Dfc\" path="Civi/Dfc"/>
+    <psr4 prefix="Civi\" path="Civi"/>
+    <psr0 prefix="CRM_Dfc_" path="CRM/Dfc"/>
+    <psr0 prefix="CRM_" path="."/>
+  </classloader>
+  <mixins>
+    <!-- schema/*.entityType.php -> hook_civicrm_entityTypes (5.73+) -->
+    <mixin>entity-types-php@2.0.0</mixin>
+    <!-- managed/*.mgd.php -> hook_civicrm_managed (5.45+).
+         Pinned to the 1.x line on purpose: mgd-php@2.0.0 is @since 6.9, and
+         declaring it would raise the compatibility floor to 6.9. mgd-php@1.1.0
+         broadens its scan to the whole extension, which is a superset of the
+         managed/ directory. Bump together with <compatibility>. -->
+    <mixin>mgd-php@1.1.0</mixin>
+    <!-- xml/Menu/*.xml -> hook_civicrm_xmlMenu (5.45+) -->
+    <mixin>menu-xml@1.0.0</mixin>
+    <!-- templates/ -> Smarty search path (5.71+);
+         also creates route civicrm/admin/setting/dfc_civicrm, the
+         "administer dfc_civicrm" permission and the System Settings nav link. -->
+    <mixin>setting-admin@1.1.1</mixin>
+    <mixin>smarty@1.0.3</mixin>
+  </mixins>
+  <!--
+    Core-provided virtual upgrader (CiviMix\Schema\DfcCivicrm\AutomaticUpgrader,
+    aliased at runtime by mixin/lib/civimix-schema@5). On `install` it runs
+    CiviMix\Schema\SchemaHelper::install(), which asks
+    SqlGenerator::createFromFolder() to read schema/*.entityType.php and emit
+    CREATE TABLE for every declared `table`. On `uninstall` it emits the
+    matching DROP TABLE.
+
+    This is the only supported way to create these tables: no hand-written SQL
+    anywhere in this extension.
+  -->
+  <upgrader>CiviMix\Schema\DfcCivicrm\AutomaticUpgrader</upgrader>
+</extension>
