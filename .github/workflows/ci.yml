@@ -1,0 +1,546 @@
+# Continuous integration for dfc_civicrm.
+#
+# ============================================================================
+# WHAT IS ACTUALLY TESTED HERE, STATED PLAINLY
+# ============================================================================
+#   TESTED     PHP 8.1, 8.2, 8.3, 8.4 - the unit suite, 1098 tests, no CMS.
+#   NOT TESTED Any CiviCRM version at all.
+#
+# info.xml declares <compatibility><ver>5.74</ver></compatibility>, which means
+# "CiviCRM 5.74 and later, including all of 6.x". NOTHING in this workflow
+# exercises that claim. There is no CiviCRM instance in this project's
+# environment (BLK-005), so install, upgrade, disable/re-enable, uninstall,
+# managed-entity creation and every HTTP route through a real routing layer are
+# untested. The 5.74 floor is a reasoned derivation from the four mixin versions
+# info.xml actually uses, documented in CHANGELOG.md - it is not a tested
+# result.
+#
+# The honest summary of this file: it proves the protocol and identity layers
+# behave as unit-asserted. It proves nothing about CiviCRM integration.
+#
+# The CiviCRM matrix job that would close that gap is specified in the report
+# accompanying this work. It cannot be written usefully until an instance
+# exists, so it is absent rather than present-and-skipped. A skipped job is
+# invisible after a month; this comment is not.
+#
+# ============================================================================
+# ACTION PINNING
+# ============================================================================
+# Every action is pinned to a full commit SHA, with the tag in a trailing
+# comment. Two reasons, in order:
+#
+#   1. A git tag is a mutable pointer. `actions/checkout@v4` can be re-pointed
+#      at new code, and code in a CI job runs with the repository's secrets.
+#      A SHA cannot move.
+#   2. The workflow is read and understood far more often than it is edited, so
+#      the tag is documentation and the SHA is the contract.
+#
+# Pins are the newest patch of the then-current major:
+#   actions/checkout@v7.0.1      3d3c42e5aac5ba805825da76410c181273ba90b1
+#   shivammathur/setup-php@2.37.2  f3e473d116dcccaddc5834248c87452386958240
+#
+# setup-php's release tags carry NO "v" prefix (the newest is 2.37.2, and the
+# floating aliases are `v1` and `v2`). The comments on each `uses:` line quote the
+# real tag, verified against the GitHub API on 2026-10-03 rather than guessed.
+#
+# Newest-major is a deliberate choice over "whatever is most widely deployed":
+# a major bump of checkout or setup-php is the kind of change that should fail
+# HERE, loudly, in a small workflow, rather than midway through a release. The
+# upgrade is one edit of three lines.
+#
+# There is no third-party action beyond those two. Composer, git, tar and the
+# `gh` CLI come from the runner image or from shivammathur/setup-php, so there
+# is nothing extra to trust.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    # 04:17 UTC daily. Off the hour on purpose: the scheduled workflows that
+    # land at :00 all queue behind each other.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+# A new push to the same branch supersedes the previous run. Keeps the queue
+# short on a busy repository and stops wasted minutes on superseded commits.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------------
+  # The unit suite, on every PHP version info.xml claims to support.
+  # --------------------------------------------------------------------------
+  unit:
+    name: unit / PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      # Do not hide a regression behind a passing older version. One failure is
+      # a failure, and it is easier to read.
+      fail-fast: false
+      matrix:
+        # Mirrors <php_compatibility> in info.xml exactly: 8.1, 8.2, 8.3, 8.4.
+        # There is no version here that info.xml does not declare, and no
+        # version it declares that this matrix does not test. That equality is
+        # the point: a PHP version a user might install is a version CI runs.
+        #
+        # The floor is 8.1 because composer.json requires ">=8.1" and PHPUnit
+        # 10.5 requires 8.1.
+        php:
+          - '8.1'
+          - '8.2'
+          - '8.3'
+          - '8.4'
+
+    steps:
+      - name: Check out the extension
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2 (this repo tags releases without the v)
+        with:
+          php-version: '${{ matrix.php }}'
+          # The four extensions composer.json requires, so a missing one is a
+          # clear message rather than a "class not found" from deep inside
+          # libxml.
+          extensions: dom, json, libxml, mbstring
+          # PHPUnit ships in require-dev; `composer` alone is what the release
+          # script needs. No coverage driver is installed, because the unit job
+          # does not collect coverage (see below).
+          tools: composer:v2, phpunit
+          coverage: none
+
+      - name: Report the resolved PHP version
+        run: php -v && php -r 'printf("PHP_VERSION_ID=%d\n", PHP_VERSION_ID);'
+
+      # ------------------------------------------------------------------------
+      # Dependency resolution.
+      #
+      # Two branches, because the repository does not currently track
+      # composer.lock. See CONTRIBUTING.md, "Should composer.lock be committed?":
+      # the recommendation is to commit it, and .gitignore is the owner's call.
+      #
+      # When the lock IS tracked, `composer install` is byte-reproducible and
+      # `composer validate --strict` is a real drift gate. When it is NOT
+      # tracked, `composer update` resolves fresh, the drift gate degrades to a
+      # log line, and the build says so out loud rather than passing quietly.
+      # ------------------------------------------------------------------------
+      - name: Install dependencies (from composer.lock)
+        if: ${{ hashFiles('composer.lock') != '' }}
+        run: |
+          composer install \
+            --no-interaction \
+            --no-progress \
+            --prefer-dist \
+            --optimize-autoloader
+
+      - name: Install dependencies (no composer.lock tracked)
+        if: ${{ hashFiles('composer.lock') == '' }}
+        run: |
+          echo "::warning::composer.lock is not tracked in this repository."
+          echo "::warning::Resolving dependencies with 'composer update', which is NOT reproducible."
+          echo "::warning::See CONTRIBUTING.md - committing composer.lock makes this step a lock-based install."
+          composer update \
+            --no-interaction \
+            --no-progress \
+            --prefer-dist \
+            --optimize-autoloader
+
+      - name: Report the resolved dependency graph
+        run: composer show --direct --no-interaction
+
+      # ------------------------------------------------------------------------
+      # The drift gate.
+      #
+      # This is a drift check we can actually back up. The project has no code
+      # generator, so there is no generated tree to diff - but the dependency
+      # graph does drift silently: `^2.0` in composer.json plus a routine
+      # `composer update` changes what ships in the next release tarball without
+      # any file changing.
+      #
+      # `composer validate --strict` exits non-zero when composer.lock is stale
+      # relative to composer.json, and when the lock cannot satisfy the
+      # manifest. Verified against Composer 2.2.6, which is what the runner
+      # image and this checkout both use:
+      #
+      #   $ composer validate --strict     # lock in sync
+      #   ./composer.json is valid
+      #   $ echo $?
+      #   0
+      #
+      #   $ composer validate --strict     # require bumped, lock left behind
+      #   ./composer.json is valid but your composer.lock has some errors
+      #   # Lock file errors
+      #   - The lock file is not up to date with the latest changes in
+      #     composer.json, ...
+      #   $ echo $?
+      #   2
+      # ------------------------------------------------------------------------
+      - name: Check composer.json against composer.lock
+        if: ${{ hashFiles('composer.lock') != '' }}
+        run: composer validate --strict --no-interaction
+
+      - name: Check composer.json shape
+        run: composer validate --strict --no-interaction --no-check-lock
+
+      # ------------------------------------------------------------------------
+      # The suite.
+      #
+      # phpunit.xml.dist already sets failOnWarning, failOnRisky and
+      # beStrictAboutOutputDuringTests. They are enforced there rather than
+      # repeated as CLI flags so that a local run and a CI run cannot disagree
+      # about what counts as a failure. `--display-warnings --display-deprecations`
+      # makes PHP-level diagnostics visible in the log even when they do not
+      # fail the build, which is how a future-version deprecation gets noticed
+      # before it becomes an error.
+      # ------------------------------------------------------------------------
+      - name: Run the unit suite
+        run: ./vendor/bin/phpunit --testsuite unit --display-warnings --display-deprecations
+
+  # --------------------------------------------------------------------------
+  # Coverage. Not a gate, and not published anywhere.
+  # --------------------------------------------------------------------------
+  coverage:
+    name: coverage / PHP 8.4
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: unit
+
+    steps:
+      - name: Check out the extension
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2 (this repo tags releases without the v)
+        with:
+          php-version: '8.4'
+          extensions: dom, json, libxml, mbstring
+          tools: composer:v2, phpunit
+          # Xdebug, so --coverage-clover has something to collect from.
+          # PCOV or Xdebug is required; without one PHPUnit silently emits an
+          # empty report, which is worse than no report.
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: |
+          if [ -f composer.lock ]; then
+            composer install --no-interaction --no-progress --prefer-dist
+          else
+            composer update --no-interaction --no-progress --prefer-dist
+          fi
+
+      - name: Collect coverage for Civi/ only
+        run: |
+          # <source> in phpunit.xml.dist is already scoped to Civi/, so CiviCRM
+          # core, the connector and the test helpers are excluded by
+          # configuration rather than by filtering the report afterwards.
+          mkdir -p build
+          ./vendor/bin/phpunit \
+            --testsuite unit \
+            --coverage-clover build/coverage.xml \
+            --coverage-filter Civi
+
+      - name: Summarise (report only)
+        run: |
+          # No threshold, no gate, no badge. A hard number here with nothing
+          # enforcing it behind it becomes a claim in a README within a month,
+          # and the number stops being maintained the moment it stops being
+          # read. If a coverage target is wanted, it belongs in a follow-up
+          # that makes it a gate and then puts it on the front page.
+          if [ ! -s build/coverage.xml ]; then
+            echo "::error::No coverage was produced. Check that a coverage driver is installed."
+            exit 1
+          fi
+          {
+            echo "### Coverage over Civi/ (informational only, not a gate)"
+            echo
+            echo '```'
+            php -r '
+              $x = simplexml_load_file("build/coverage.xml");
+              $m = $x->project->metrics;
+              printf(
+                "lines:   %d / %d  (%.1f%%)\n",
+                (int) $m["coveredstatements"],
+                (int) $m["statements"],
+                100 * (int) $m["coveredstatements"] / max(1, (int) $m["statements"])
+              );
+              printf(
+                "methods: %d / %d  (%.1f%%)\n",
+                (int) $m["coveredmethods"],
+                (int) $m["methods"],
+                100 * (int) $m["coveredmethods"] / max(1, (int) $m["methods"])
+              );
+            '
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the raw coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-clover
+          path: build/coverage.xml
+          retention-days: 7
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # The conformance suite. One network-dependent test class.
+  # --------------------------------------------------------------------------
+  conformance-network:
+    name: conformance / network (non-blocking on PRs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: unit
+
+    # Non-blocking on pull requests, blocking on push to main, on the nightly
+    # schedule and on manual dispatch. See CONTRIBUTING.md for the reasoning;
+    # the short version is that this job tests a third party's dev realm, and a
+    # build that goes red when that realm is down is a build people learn to
+    # ignore.
+    #
+    # It still runs, still shows its result on the pull request, and still fails
+    # nightly - which is when an upstream change is worth acting on.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+    steps:
+      - name: Check out the extension
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2 (this repo tags releases without the v)
+        with:
+          php-version: '8.1'
+          # openssl is not listed by composer.json because ext-openssl is part
+          # of a default PHP build rather than a separately compiled module,
+          # but this suite calls openssl_pkey_get_public() on every published
+          # key, so it is named here to make the requirement explicit.
+          extensions: dom, json, libxml, mbstring, openssl
+          tools: composer:v2, phpunit
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          if [ -f composer.lock ]; then
+            composer install --no-interaction --no-progress --prefer-dist
+          else
+            composer update --no-interaction --no-progress --prefer-dist
+          fi
+
+      - name: Run the conformance suite
+        run: ./vendor/bin/phpunit --testsuite conformance --display-warnings
+
+      - name: Explain a failure
+        if: failure()
+        run: |
+          {
+            echo "### The conformance suite failed"
+            echo
+            echo '`tests/conformance/LiveJwksTest.php` dereferences the DFC dev realm'
+            echo '`https://login.fooddatacollaboration.org.uk/realms/dev`. This job asserts that'
+            echo 'the realm publishes an RSA key set this extension can turn into a PEM,'
+            echo 'that at least one key serves RS256 for signature verification, and that no'
+            echo 'published entry is skipped as unusable.'
+            echo
+            echo 'It does **not** verify a signature or assert a specific `kid` - key rotation is'
+            echo 'expected and must not fail a build.'
+            echo
+            echo 'So a failure means one of: the realm is down or unreachable from the runner;'
+            echo 'or its key set changed shape. The second is worth investigating upstream and'
+            echo 'is the reason this job runs on a schedule.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # --------------------------------------------------------------------------
+  # Release metadata drift. No dependencies needed, so it runs fast and first.
+  # --------------------------------------------------------------------------
+  release-metadata:
+    name: release metadata / info.xml <-> CHANGELOG.md
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out the extension
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # info.xml <version> against CHANGELOG.md, plus the two structural
+      # invariants that fail on a live site rather than in a test: the extension
+      # key must equal the directory name, and <file> must equal <key>. Both are
+      # how CRM_Extension_Info::parse() resolves <ext-dir>/<key>/<file>.php.
+      #
+      # Deliberately has no `needs:` on anything. This is the cheapest job in the
+      # workflow and it catches the most annoying class of mistake - a manifest
+      # bump with no changelog entry - so it should not wait 25 seconds for a
+      # PHP matrix.
+      - name: Check release metadata
+        run: ./tools/check-release-metadata.sh
+
+      # The release tag is checked in release.yml, not here, because a pull
+      # request has no tag to check.
+
+  # --------------------------------------------------------------------------
+  # The packaging script, exercised on every change.
+  #
+  # This is the job that makes the release story honest. The archive shape is
+  # the one thing about packaging that can be verified without a CiviCRM site:
+  # if a change causes vendor/, tests/ or .github/ to appear in the archive, or
+  # breaks the required top-level files, this goes red before a release does.
+  # --------------------------------------------------------------------------
+  package-shape:
+    name: release package shape
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: release-metadata
+
+    steps:
+      - name: Check out the extension
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2 (this repo tags releases without the v)
+        with:
+          php-version: '8.1'
+          extensions: dom, json, libxml, mbstring
+          tools: composer:v2
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          if [ -f composer.lock ]; then
+            composer install --no-interaction --no-progress --prefer-dist
+          else
+            composer update --no-interaction --no-progress --prefer-dist
+          fi
+
+      # The tree is clean at this point (checkout leaves it that way), so
+      # build-release.sh will not refuse for dirtiness. Good: this also exercises
+      # the clean-tree path, which cannot be tested from a dirty checkout.
+      - name: Build the release archive
+        run: ./tools/build-release.sh
+
+      - name: Assert the archive shape
+        run: |
+          set -euo pipefail
+
+          # The member list is written ONCE to a file and every assertion greps
+          # that file.
+          #
+          # Not a style preference. `tar -tzf ... | grep -q ...` under
+          # `set -o pipefail` is a trap: grep -q exits the instant it finds a
+          # match, tar then takes SIGPIPE and dies with status 141, and
+          # pipefail propagates that as a failure of the whole pipeline. The
+          # assertion then reports "missing from the archive" for a file that is
+          # demonstrably in it. Verified locally against this very archive:
+          #
+          #   $ set -euo pipefail
+          #   $ tar -tzf dfc_civicrm-0.1.0.tar.gz | grep -q "^dfc_civicrm/info.xml"
+          #   $ echo $?
+          #   141
+          VERSION="$(sed -n -E 's/^[[:space:]]*<version>([^<]+)<\/version>[[:space:]]*$/\1/p' info.xml | head -n 1)"
+          ARCHIVE="build/dfc_civicrm-${VERSION}.tar.gz"
+          test -f "${ARCHIVE}"
+
+          MEMBERS="build/.archive-members.txt"
+          tar -tzf "${ARCHIVE}" > "${MEMBERS}"
+          echo "Archive members: $(wc -l < "${MEMBERS}" | tr -d ' ')"
+
+          # Exactly one top-level directory, named for the extension key.
+          # CiviCRM installs an extension from <ext-dir>/<key>/, so a stray
+          # second top-level entry is an archive that unzips wrong.
+          ROOTS="$(cut -d/ -f1 "${MEMBERS}" | sort -u)"
+          if [ "${ROOTS}" != "dfc_civicrm" ]; then
+            echo "::error::expected exactly one top-level entry 'dfc_civicrm', found: ${ROOTS}"
+            exit 1
+          fi
+
+          # <file> from info.xml must exist at the extension root, or
+          # CRM_Extension_Info::parse() resolves a path that is not there.
+          FILE="$(sed -n -E 's/^[[:space:]]*<file>([^<]+)<\/file>[[:space:]]*$/\1/p' info.xml | head -n 1)"
+          grep -qx "dfc_civicrm/${FILE}.php" "${MEMBERS}" \
+            || { echo "::error::dfc_civicrm/${FILE}.php missing (info.xml <file>)"; exit 1; }
+
+          # The runtime pieces a site needs. Prefix match, because tar records a
+          # directory as "path/" with a trailing slash.
+          for required in \
+            dfc_civicrm/info.xml \
+            dfc_civicrm/Civi/Api4/DfcIdentity.php \
+            dfc_civicrm/Civi/Dfc/V2/Identity/DfcReleaseConfig.php \
+            dfc_civicrm/config/dfc-release.yaml \
+            dfc_civicrm/schema \
+            dfc_civicrm/managed \
+            dfc_civicrm/xml \
+            dfc_civicrm/vendor/VENDORED.md \
+            dfc_civicrm/vendor/siol-data/dfc-connector/php-connector/src/Connector.php \
+            dfc_civicrm/vendor/siol-data/dfc-connector/php-connector/contexts \
+            dfc_civicrm/vendor/siol-data/dfc-connector/php-connector/vocabularies \
+            dfc_civicrm/vendor/siol-data/dfc-connector/php-connector/LICENSE
+          do
+            grep -q -E "^${required}(/|$)" "${MEMBERS}" \
+              || { echo "::error::missing from the archive: ${required}"; exit 1; }
+          done
+          echo "All 12 required paths present."
+
+          # The development-only paths. vendor/ appears above as the *vendored
+          # runtime*, so the check is on the paths that must be absent, not on
+          # the word vendor.
+          for forbidden in \
+            dfc_civicrm/vendor/siol-data/dfc-connector/ruby-gem \
+            dfc_civicrm/vendor/siol-data/dfc-connector/typescript-connector \
+            dfc_civicrm/vendor/siol-data/dfc-connector/tests \
+            dfc_civicrm/vendor/siol-data/dfc-connector/docs \
+            dfc_civicrm/vendor/siol-data/dfc-connector/config \
+            dfc_civicrm/tests \
+            dfc_civicrm/.github \
+            dfc_civicrm/tools \
+            dfc_civicrm/phpunit.xml.dist \
+            dfc_civicrm/composer.lock \
+            dfc_civicrm/.gitignore
+          do
+            if grep -q -E "^${forbidden}(/|$)" "${MEMBERS}"; then
+              echo "::error::forbidden path present in the archive: ${forbidden}"
+              exit 1
+            fi
+          done
+          echo "All 11 forbidden paths absent."
+
+          # A checksum file next to the archive, so a downloaded release can be
+          # verified.
+          test -s build/SHA256SUMS
+          ( cd build && sha256sum --check SHA256SUMS )
+
+      # Same tag from the same commit must produce the same bytes. The archive
+      # fixes mtime, sorts names, drops owner information and suppresses the
+      # gzip timestamp, so this should pass. It is here because a regression in
+      # reproducibility is invisible until two releases differ unexpectedly.
+      - name: Assert the build is reproducible
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n -E 's/^[[:space:]]*<version>([^<]+)<\/version>[[:space:]]*$/\1/p' info.xml | head -n 1)"
+          ARCHIVE="dfc_civicrm-${VERSION}.tar.gz"
+
+          FIRST="$(sha256sum "build/${ARCHIVE}" | cut -d' ' -f1)"
+          ./tools/build-release.sh --output-dir build-second
+          SECOND="$(sha256sum "build-second/dfc_civicrm/${ARCHIVE}" | cut -d' ' -f1)"
+
+          if [ "${FIRST}" != "${SECOND}" ]; then
+            echo "::error::build is not reproducible: ${FIRST} vs ${SECOND}"
+            exit 1
+          fi
+          echo "Reproducible: ${FIRST}"
+
+      - name: Upload the archive for manual inspection
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archive
+          path: |
+            build/*.tar.gz
+            build/SHA256SUMS
+            build/BUILD-METADATA.txt
+          retention-days: 7
+          if-no-files-found: error

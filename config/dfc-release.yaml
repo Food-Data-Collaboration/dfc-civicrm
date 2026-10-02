@@ -1,0 +1,133 @@
+# DFC release descriptor — the copy THIS EXTENSION SHIPS.
+#
+# ============================================================================
+# WHY THIS FILE EXISTS IN THE RELEASE ARCHIVE
+# ============================================================================
+# Civi\Dfc\V2\Identity\DfcReleaseConfig::fromDescriptorFile() reads this file
+# at runtime to resolve the DFC version, the JSON-LD `@context` URL and the
+# `dfc-b:` / `dfc-t:` prefix IRIs. PRD-002 §5 is explicit that these are never
+# hand-coded per mapper: they are configuration, and the extension reads them.
+#
+# So this file has to exist *inside* the shipped extension, and it has to be
+# readable by a deliberately restricted YAML parser:
+#
+#   Civi\Dfc\V2\Identity\ReleaseDescriptorParser
+#
+# That parser has no YAML dependency behind it (an extension must install
+# without an administrator running Composer in the checkout, and CiviCRM core
+# ships no YAML parser). It supports block mappings, sequences of scalars and
+# three scalar quoting styles. It REJECTS, loudly and with a line number:
+# anchors, aliases, tags, flow collections ({ } [ ]), block scalars (| >),
+# tab indentation, and duplicate keys.
+#
+# Consequence: never "prettify" this file with a YAML emitter. Round-tripping it
+# through a real YAML writer will produce flow collections and the parser will
+# refuse the file at runtime.
+#
+# ============================================================================
+# PROVENANCE
+# ============================================================================
+# Everything ABOVE the `dfc_civicrm:` block is a verbatim copy of
+# `config/dfc-release.yaml` in the DFC-LinkML repository
+# (Food-Data-Collaboration/DFC-LinkML), as shipped in
+# siol-data/linkml-connector v2.0.5 (composer.lock pins this version).
+#
+# Upstream's own header for that file reads:
+#
+#   "DFC release manifest — machine-readable source of truth for SDK
+#    generation. Everything generated in this repo must be reproducible from
+#    the pins below."
+#
+# The `dfc_civicrm:` block below is the ONLY addition, and it exists because
+# upstream does not publish these values in a place a runtime consumer can
+# find: they live in `config/dfc-default.yaml`, which is the schema
+# GENERATOR's input (BLK-009). See the block's own comments.
+#
+# ============================================================================
+# HOW TO REFRESH THIS FILE ON A DFC RELEASE BUMP
+# ============================================================================
+#   1. Take config/dfc-release.yaml from the connector release whose version is
+#      pinned in composer.lock (or a newer one you have decided to adopt).
+#   2. Replace everything above the `dfc_civicrm:` block with it, keeping the
+#      block itself.
+#   3. Run `tools/check-release-metadata.sh` and
+#      `php -r` over Civi\Dfc\V2\Identity\DfcReleaseConfig::fromDescriptorFile()
+#      to prove the new pins still load.
+#   4. Bump config/dfc_civicrm.<version>.entityType.php? No — nothing schema-like
+#      reads this file. Bump the extension version in info.xml + CHANGELOG.md.
+#
+# A DFC ontology bump changes the `@context` URL of every document and changes
+# NO minted @id: the `dfc-b:` / `dfc-t:` prefix IRIs are UNVERSIONED upstream
+# (no `/v2.0.0/` segment). That asymmetry is load-bearing for URI stability —
+# see Civi\Dfc\V2\Identity\DfcReleaseConfig rules R1 and R2, and
+# tests/phpunit/Identity/UriFactoryStabilityTest.php.
+#
+# ---------------------------------------------------------------------------
+# Tests use tests/fixtures/dfc-release.yaml, which is a sibling copy of this
+# file. Keep the two in step: the fixture proves the plumbing, this file is
+# what ships.
+# ---------------------------------------------------------------------------
+
+dfc_ontology_version: "2.0.0"
+dfc_taxonomy_version: "2.0.0"
+
+# SDK version — the version of the generated connectors. Informational for this
+# extension: recorded for provenance in cross-connector compatibility checks
+# (sa-015), never minted into a URI. Held at 2.0.5 to match the connector
+# version pinned in composer.lock.
+sdk_version: "2.0.5"
+
+ontology:
+  business_url: "https://w3id.org/dfc/ontology/v2.0.0/src/DFC_BusinessOntology.rdf"
+  technical_url: "https://w3id.org/dfc/ontology/v2.0.0/src/DFC_TechnicalOntology.rdf"
+
+taxonomies:
+  base_url: "https://w3id.org/dfc/taxonomies"
+
+schema:
+  file: "src/dfc_business_linkml_v2_0.yaml"
+  config: "config/dfc-default.yaml"
+
+outputs:
+  typescript: "typescript-connector/"
+  ruby: "ruby-gem/"
+  php: "php-connector/"
+
+original_test_versions:
+  typescript: "2.0.0-beta.2"
+  ruby: "2.0.0.pre.beta8"
+
+# ---------------------------------------------------------------------------
+# dfc_civicrm: additions — NOT upstream.
+#
+# Copied verbatim from upstream config/dfc-default.yaml, which is the schema
+# generator's input rather than a release descriptor, so a runtime consumer
+# would otherwise have to go and find it. DfcReleaseConfig::fromDescriptorArray()
+# refuses to guess these: a missing `dfc_civicrm.prefixes` map is an
+# InvalidConfigurationException, not a default.
+#
+# The prefix IRIs are UNVERSIONED on purpose — see the note in the header.
+# ---------------------------------------------------------------------------
+
+dfc_civicrm:
+  # Release-scoped ontology distribution base. Template in upstream
+  # config/dfc-default.yaml under `ontology_base`: "Base URL for versioned
+  # ontology files (version is appended as /v{version}/)".
+  ontology_file_base: "https://w3id.org/dfc/ontology/v2.0.0/"
+
+  # Copied verbatim from upstream config/dfc-default.yaml, `prefixes:`.
+  prefixes:
+    dfc-b: "https://w3id.org/dfc/ontology/src/DFC_BusinessOntology.owl#"
+    dfc-t: "https://w3id.org/dfc/ontology/src/DFC_TechnicalOntology.owl#"
+
+  # Also verbatim from config/dfc-default.yaml, which lists vcard: and linkml:
+  # alongside the two DFC prefixes because "DFC aligns Agent, Organization,
+  # Person and Enterprise with vCard classes via owl:equivalentClass" and
+  # `vcard:Agent` and `dfc-b:Agent` share a local name.
+  #
+  # Recorded for provenance only. No URI in this extension is minted from them,
+  # and DfcReleaseConfig deliberately does not model them: they matter to the
+  # JSON-LD export layer (sa-010), not to the identity layer.
+  other_prefixes:
+    vcard: "http://www.w3.org/2006/vcard/ns#"
+    linkml: "https://w3id.org/linkml/"

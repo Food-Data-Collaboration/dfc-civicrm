@@ -1,0 +1,363 @@
+# Release workflow for dfc_civicrm.
+#
+# ============================================================================
+# UNTESTED END TO END. READ THIS FIRST.
+# ============================================================================
+# This repository has NO REMOTE. `git remote -v` is empty. This workflow has
+# never run. Not once. There is no way for it to have run.
+#
+# What that means concretely:
+#   - The trigger has never fired.
+#   - `gh release create` has never been executed against a real GitHub
+#     repository, so its argument handling, its permission model and its
+#     behaviour when a release already exists are all unverified.
+#   - No tag has ever been pushed.
+#
+# What HAS been verified, on this machine:
+#   - Every step's shell logic, with the same commands, by hand. See
+#     "Verified locally" at the bottom of this file.
+#   - `tools/check-release-metadata.sh` and `tools/build-release.sh` both run
+#     clean under `bash -n` and `shellcheck`, and `build-release.sh` produces a
+#     correctly-shaped archive.
+#
+# Treat the first run as a rehearsal. Run it with workflow_dispatch on a throwaway
+# tag, inspect the artefact, THEN tag a real version.
+#
+# ============================================================================
+# RELEASE TRIGGER: a git tag, and nothing else
+# ============================================================================
+# `on: push: tags: [ '[0-9]*.[0-9]*.[0-9]*' ]`
+#
+# Why a tag and not a manual dispatch, a release event, or a version bump in a
+# file:
+#
+#   A CiviCRM extension release IS a tag. CiviCRM's Extensions Directory
+#   publishes from the tag (docs.civicrm.org/dev/en/latest/extensions/publish/:
+#   "Create a git tag which matches the version in the manifest and push it",
+#   with GitLab releases appearing immediately and GitHub taking up to 24
+#   hours). So the tag is the artefact everyone downstream consumes. Making this
+#   workflow fire on anything else would build a release that the Directory
+#   never learns about.
+#
+#   The tag pattern is deliberately loose ('[0-9]*.[0-9]*.[0-9]*') and the
+#   STRICTNESS lives in the script, not in the glob. A glob cannot express
+#   SemVer, and a pattern loose enough to catch `0.1.0` also catches
+#   `v0.1.0` and `0.1.0-rc1`. `check-release-metadata.sh --require-tag` is
+#   where a non-SemVer tag fails, with a message saying what a SemVer tag looks
+#   like. A workflow that rejects a bad tag in the shell gives a better error
+#   than one that silently does not match.
+#
+#   A manual dispatch exists for rehearsals only. It builds and uploads as a
+#   draft-ish release with the tag as the title, and it does not push a tag, so
+#   it cannot be mistaken for a real release. See the note on the job.
+#
+#   Bumping `<version>` in info.xml alone does NOT release anything. That is the
+#   correct behaviour: the version in the manifest and the tag must agree, and
+#   the release workflow is where they are compared.
+#
+# ============================================================================
+# WHAT THE PUBLISHED ARCHIVE IS
+# ============================================================================
+#   dfc_civicrm-<version>.tar.gz  - extension files + the vendored DFC-LinkML
+#                                    PHP connector runtime, no vendor/ from the
+#                                    build, no tests/, no .github/, no tools/
+#   SHA256SUMS                   - checksums
+#   BUILD-METADATA.txt           - commit, git describe, connector version
+#
+# Built by tools/build-release.sh, which refuses to run on a dirty tree. On a
+# tag checkout the tree is always clean, so the guard is belt-and-braces; it
+# matters for local rehearsals and for anyone running the script by hand.
+#
+# ============================================================================
+# ACTION PINNING
+# ============================================================================
+# Same pins as ci.yml, same reasoning, same SHAs:
+#   actions/checkout@v7.0.1      3d3c42e5aac5ba805825da76410c181273ba90b1
+#   shivammathur/setup-php@2.37.2  f3e473d116dcccaddc5834248c87452386958240
+#
+# setup-php's release tags carry NO "v" prefix; the `uses:` comments quote the
+# real tag, verified against the GitHub API on 2026-10-03.
+#
+# Releasing is the highest-privilege thing this repository does, so these pins
+# are the ones that most need to be immutable. Release creation uses the `gh` CLI
+# from the runner image rather than a third-party action such as
+# softprops/action-gh-release: one fewer third party whose commit would need
+# auditing, and `gh` is already authenticated by the ambient GITHUB_TOKEN.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]*.[0-9]*.[0-9]*'
+  # Rehearsal only. Builds the same archive and attaches it to a release, but
+  # does NOT create or push a git tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build as, e.g. 0.1.0. Must match info.xml <version>.'
+        required: true
+        type: string
+
+# Never let two releases build at once. `cancel-in-progress: false` is the point:
+# a superseded release build must finish, not be cancelled half way through, or
+# the tag ends up with no release attached to it.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and attach the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Resolve the tag being released
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Releasing tag: ${TAG}"
+
+      # fetch-depth: 0 is required, not cosmetic. `git describe --tags` needs the
+      # tag history to produce a meaningful GIT_DESCRIBE value, which
+      # build-release.sh stamps into BUILD-METADATA.txt. A shallow clone would
+      # put a bare SHA there instead.
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2 (this repo tags releases without the v)
+        with:
+          php-version: '8.1'
+          extensions: dom, json, libxml, mbstring
+          tools: composer:v2, phpunit
+          coverage: none
+
+      # ----------------------------------------------------------------------
+      # Gate 1: the tag, the manifest and the changelog must agree.
+      #
+      # This runs BEFORE anything is built. A release whose info.xml disagrees
+      # with its tag is a release the Extensions Directory would publish under
+      # the wrong version, and the only place to catch that is before the bytes
+      # exist.
+      #
+      # --release-date "$(date -u +%F)" enforces the second of the two changes
+      # CiviCRM's publish docs call out as required: "At minimum you'll need to
+      # make two changes in order for the release to be published as the latest
+      # release: increment the version number; and update the release date."
+      # A forgotten release date is the most common reason a release does not
+      # appear as latest, and it is trivially checkable at push time.
+      # ----------------------------------------------------------------------
+      - name: Check the tag against info.xml and CHANGELOG.md
+        run: ./tools/check-release-metadata.sh \
+          --require-tag "${{ steps.tag.outputs.tag }}" \
+          --release-date "$(date -u +%F)"
+
+      # ----------------------------------------------------------------------
+      # Gate 2: the unit suite, on the exact commit being released.
+      #
+      # phpunit.xml.dist's failOnWarning / failOnRisky / beStrictAboutOutputDuringTests
+      # apply here exactly as in CI, because it is the same config file. There is
+      # no "relax it for releases" path and there should not be.
+      #
+      # Only 8.1 runs. The full 8.1-8.4 matrix is ci.yml's job, and a release is
+      # cut from a commit that already passed it. Duplicating the matrix here
+      # would make a release take four times as long to catch a problem that
+      # main would have caught first.
+      #
+      # BLK-012 / BLK-005: no CiviCRM instance exists, so this is still the
+      # whole of the test coverage behind a release. A release cut today would be
+      # one that has never been installed anywhere.
+      # ----------------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          if [ -f composer.lock ]; then
+            composer install --no-interaction --no-progress --prefer-dist --optimize-autoloader
+          else
+            echo "::warning::composer.lock is not tracked; resolving with composer update."
+            echo "::warning::The bytes in this release are therefore not reproducible. See CONTRIBUTING.md."
+            composer update --no-interaction --no-progress --prefer-dist --optimize-autoloader
+          fi
+
+      - name: Run the unit suite
+        run: ./vendor/bin/phpunit --testsuite unit
+
+      # ----------------------------------------------------------------------
+      # Gate 3: the dependency graph in the release is what it claims to be.
+      #
+      # With composer.lock tracked, `composer validate --strict` fails when the
+      # lock is stale relative to composer.json - so the dependency that ships in
+      # this tarball is the pinned one. Without the lock this degrades to an
+      # informational note, which is the honest outcome rather than a green check
+      # that means nothing.
+      # ----------------------------------------------------------------------
+      - name: Check the dependency graph
+        run: |
+          composer show --direct --no-interaction
+          if [ -f composer.lock ]; then
+            composer validate --strict --no-interaction
+          else
+            echo "::warning::composer.lock absent: this release's dependency versions were resolved at build time and are not reproducible."
+          fi
+
+      # ----------------------------------------------------------------------
+      # Build the archive.
+      #
+      # build-release.sh asserts the shape and refuses on a dirty tree. The
+      # checkout is clean, so the guard will not fire; if it does, that is a
+      # genuine problem worth failing the release over.
+      # ----------------------------------------------------------------------
+      - name: Build the release archive
+        run: ./tools/build-release.sh
+
+      - name: Show what is in the release
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release contents"
+            echo
+            echo '```'
+            tar -tzf build/*.tar.gz | head -n 200
+            echo '```'
+            echo
+            echo "Total members: $(tar -tzf build/*.tar.gz | wc -l)"
+            echo "Archive size:  $(wc -c < build/*.tar.gz | tr -d ' ') bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: State plainly what has NOT been tested
+        run: |
+          {
+            echo '### What this release has not been through'
+            echo
+            echo '- No CiviCRM installation of any version. Install, upgrade, disable/re-enable and'
+            echo '  uninstall are untested (BLK-005).'
+            echo '- No HTTP request has been served by a real routing layer.'
+            echo '- No DFC resource endpoint exists yet; PRD-002 success criteria 1-5 and 11-15 are unmet.'
+            echo '- `<develStage>alpha` is not listed in the CiviCRM Extensions Directory, so this'
+            echo '  release is installable from this URL but not in-app.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------------
+      # Attach the archive to the release.
+      #
+      # The release notes are the CHANGELOG.md section for this version, taken
+      # verbatim, so the two cannot drift: `check-release-metadata.sh` already
+      # proved the section exists.
+      #
+      # GITHUB_TOKEN, not a PAT. Nothing here needs a scope beyond the
+      # repository it is already running in, so there is no long-lived secret to
+      # rotate or leak. The job's `permissions: contents: write` is the grant.
+      # ----------------------------------------------------------------------
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # No ${TAG#v} stripping here, deliberately. check-release-metadata.sh
+          # rejects a "v"-prefixed tag outright rather than tolerating it, so by
+          # the time this runs the tag is a bare version and equals <version>.
+          # Stripping in one place and rejecting in the other would leave a state
+          # where the gate passes and the archive name does not match the release.
+          VERSION="${TAG}"
+          ARCHIVE="build/dfc_civicrm-${VERSION}.tar.gz"
+          test -f "${ARCHIVE}"
+
+          # Pull this version's section out of the changelog, minus the heading
+          # line. awk rather than sed because the section runs to the next "## "
+          # heading or end of file.
+          NOTES="$(mktemp)"
+          awk -v want="## [${VERSION}] - " '
+            index($0, "## ") == 1 {
+              if (emitting) { exit }
+              if (index($0, want) == 1) { emitting = 1; next }
+            }
+            emitting { print }
+          ' CHANGELOG.md > "${NOTES}"
+
+          if [ ! -s "${NOTES}" ]; then
+            echo "::error::CHANGELOG.md has no non-empty section for ${VERSION}; refusing to publish empty release notes."
+            exit 1
+          fi
+
+          # --verify-tag makes `gh` refuse if the tag does not exist upstream.
+          # It does, because we checked out from it, but the check is free.
+          # --generate-notes adds GitHub's auto-generated commit list BELOW the
+          # changelog section, so the curated notes stay first.
+          # --latest makes this the "latest release"; a rehearsal must NOT do
+          # that, so a dispatched run is marked as a prerelease instead.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::warning::Rehearsal run from workflow_dispatch. Attaching as a prerelease so it does not become the repository's latest release."
+            gh release create "${TAG}" \
+              "${ARCHIVE}" \
+              build/SHA256SUMS \
+              build/BUILD-METADATA.txt \
+              --title "REHEARSAL ${TAG} (not published to the Extensions Directory)" \
+              --notes-file "${NOTES}" \
+              --verify-tag \
+              --prerelease
+          else
+            gh release create "${TAG}" \
+              "${ARCHIVE}" \
+              build/SHA256SUMS \
+              build/BUILD-METADATA.txt \
+              --title "${TAG}" \
+              --notes-file "${NOTES}" \
+              --verify-tag \
+              --latest \
+              --generate-notes
+          fi
+
+      - name: Upload the archive as a workflow artifact too
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dfc_civicrm-release-${{ steps.tag.outputs.tag }}
+          path: |
+            build/*.tar.gz
+            build/SHA256SUMS
+            build/BUILD-METADATA.txt
+          retention-days: 90
+          if-no-files-found: error
+
+      # ==========================================================================
+      # Verified locally, by hand, with these exact commands
+      # ==========================================================================
+      # On this machine, on a clean checkout, with no remote:
+      #
+      #   $ bash -n tools/build-release.sh tools/check-release-metadata.sh
+      #   (exit 0)
+      #   $ shellcheck tools/build-release.sh tools/check-release-metadata.sh
+      #   (exit 0, no findings)
+      #   $ ./tools/build-release.sh --dry-run
+      #   (asserts pass; member list printed; nothing written)
+      #   $ ./tools/check-release-metadata.sh
+      #   ok: extension key matches directory name (dfc_civicrm)
+      #   ok: <file> matches <key> (dfc_civicrm)
+      #   ok: info.xml <version> is SemVer (0.1.0)
+      #   ok: info.xml <releaseDate> looks like a date (2026-10-01)
+      #   ok: CHANGELOG.md has '## [0.1.0] - 2026-10-01'
+      #   ok: composer.json declares no version (the git tag is the source of truth)
+      #   note: info.xml <develStage> is "alpha". ...
+      #   check-release-metadata.sh: all release metadata checks passed.
+      #
+      # NOT verified, and not verifiable without a remote:
+      #   - this file ever running at all
+      #   - `gh release create` succeeding, or its flags behaving as documented
+      #   - GITHUB_TOKEN having the permissions `permissions: contents: write` grants
+      #   - the Extensions Directory detecting the tag (GitHub: up to 24 hours)
+      #   - the resulting archive being accepted by a CiviCRM installation
+      # ==========================================================================

@@ -15,6 +15,9 @@ composer.lock
 /.env
 /.env.local
 
+# Release build output - tools/build-release.sh writes here
+/build/
+
 # OS noise
 .DS_Store
 Thumbs.db
