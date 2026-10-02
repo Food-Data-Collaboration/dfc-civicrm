@@ -1,0 +1,109 @@
+# SHACL fixture shape — hermetic test input for LocalShaclValidator
+#
+# WHY THIS FILE EXISTS AND IS NOT THE UPSTREAM SHAPES
+#   PRD-002 §5 names the real shapes: `shacl/dfc_business.shacl.ttl` (210 KB) and
+#   `shacl/dfc_technical.shacl.ttl` in Food-Data-Collaboration/DFC-LinkML. Those are
+#   not vendored here (see FileShaclShapeRepository), and the unit suite must not
+#   depend on a checkout of another repository. This file is a SMALL shape written
+#   to exercise the documented subset of TurtleShapeParser:
+#
+#     * @prefix, `a`, CURIEs, one absolute IRI
+#     * annotations that MUST be discarded, not obeyed: sh:message, rdfs:label
+#     * sh:closed with sh:ignoredProperties
+#     * sh:minCount, sh:maxCount, sh:maxLength, sh:datatype
+#     * sh:nodeKind sh:IRI
+#     * sh:in as an RDF collection
+#     * sh:severity sh:Warning, which must NOT fail a request
+#
+# Prefix IRIs for dfc-b: and dfc-t: are the ones DfcReleaseConfig treats as
+# upstream configuration (`config/dfc-default.yaml`), not protocol constants.
+
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix dct:  <http://purl.org/dc/terms/> .
+@prefix dfc-b: <https://w3id.org/dfc/ontology/src/DFC_BusinessOntology.owl#> .
+@prefix dfc-t: <https://w3id.org/dfc/ontology/src/DFC_TechnicalOntology.owl#> .
+@prefix ex:   <https://platform.example/dfc/v2/shapes/> .
+
+#
+# The Organization shape. dfc-b:Organization is what dfc-b:Enterprise maps to
+# (PRD-002 "Upstream refresh" item 6), so this shape's target is the class lane-3
+# will actually persist.
+#
+ex:OrganizationShape
+    a sh:NodeShape ;
+    sh:targetClass dfc-b:Organization ;
+    sh:closed true ;
+    sh:ignoredProperties ( dfc-b:description ) ;
+    sh:message "A dfc-b:Organization needs a name." ;
+    sh:description "The abridged Organization shape used by the dfc-civicrm unit suite." ;
+    rdfs:label "Organization" ;
+    dct:source "DFC-LinkML shacl/dfc_business.shacl.ttl (abridged fixture)" ;
+    sh:property [
+        sh:path dfc-b:name ;
+        sh:minCount 1 ;
+        sh:maxLength 255 ;
+        sh:datatype xsd:string ;
+    ] ;
+    sh:property [
+        sh:path dfc-b:description ;
+        sh:maxCount 1 ;
+        sh:maxLength 2000 ;
+        sh:datatype xsd:string ;
+    ] ;
+    sh:property [
+        sh:path dfc-b:websiteAddress ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:pattern "^https://" ;
+    ] ;
+    sh:property [
+        sh:path dfc-b:hasMainContact ;
+        sh:nodeKind sh:IRI ;
+    ] ;
+    sh:property [
+        sh:path dfc-b:businessStatus ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Warning ;
+    ] ;
+    sh:property [
+        sh:path dfc-b:hasAddress ;
+        sh:maxCount 1 ;
+        sh:class dfc-b:Address ;
+    ] .
+
+#
+# An enum-bearing predicate, to pin the sh:in / sh:severity behaviour.
+#
+ex:OrganizationStatusShape
+    a sh:NodeShape ;
+    sh:targetClass dfc-b:Organization ;
+    sh:property [
+        sh:path dfc-b:businessStatus ;
+        sh:maxCount 1 ;
+        sh:in ( "https://w3id.org/dfc/ontology/DFC-Business/Active" "https://w3id.org/dfc/ontology/DFC-Business/Inactive" ) ;
+        sh:severity sh:Warning ;
+    ] .
+
+#
+# A nested value class, so focus-node collection over nested node maps is exercised.
+# sh:class is checked against an INLINE node map only; a bare IRI reference is not
+# class-checked (see LocalShaclValidator for why).
+#
+ex:AddressShape
+    a sh:NodeShape ;
+    sh:targetClass dfc-b:Address ;
+    sh:property [
+        sh:path dfc-b:hasStreet ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+    ] ;
+    sh:property [
+        sh:path dfc-b:hasPostalCode ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+    ] .

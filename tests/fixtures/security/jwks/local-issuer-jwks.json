@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "JWKS fixture for the OIDC unit tests. Deliberately NOT the DFC realm's key set:",
+    "the suite must not depend on the network, and a real published key in a",
+    "repository is a fingerprinting liability. The RSA modulus and exponent here are",
+    "generated per test run by JsonWebKeyTestHelper, so these values are placeholders",
+    "and are only ever used by tests that assert SHAPE, never signature verification.",
+    "The one thing this fixture does pin is the two-key shape the live realm",
+    "publishes: an `use: enc` key alongside the `use: sig` key, so selection by",
+    "`use` AND `alg` is exercised."
+  ],
+  "keys": [
+    {
+      "kid": "fixture-encryption-key",
+      "kty": "RSA",
+      "alg": "RSA-OAEP",
+      "use": "enc"
+    },
+    {
+      "kid": "fixture-signing-key",
+      "kty": "RSA",
+      "alg": "RS256",
+      "use": "sig"
+    }
+  ]
+}
