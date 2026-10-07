@@ -1,47 +1,106 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!--
-  DFC v2 HTTP surface.
+  DFC v2 HTTP surface — reconciled against Food-Data-Collaboration/dfc-api-doc
+  dfc-ldp.yaml (OpenAPI 3.0.1, v2.0.0) on 2026-10-07.
 
-  Wiring: info.xml declares <mixin>menu-xml@1.0.0</mixin>, whose listener
-  globs "xml/Menu/*.xml" and pushes each file onto hook_civicrm_xmlMenu. CiviCRM
-  parses the file into the civicrm_menu table on the next menu-cache rebuild
+  Wiring: info.xml declares <mixin>menu-xml@1.0.0</mixin>, whose listener globs
+  "xml/Menu/*.xml" and pushes each file onto hook_civicrm_xmlMenu. CiviCRM parses
+  the file into the civicrm_menu table on the next menu-cache rebuild
   (Administer > System Settings > Paths > Clear the caches, or `cv flush`).
   Changing this file therefore requires a cache flush before it takes effect.
 
-  NOTE on element names: the CiviCRM routing schema is
-  <menu><item><path/>...</item></menu>. There is no <route> element - the
-  element that a route is declared with is <item>, and the URL is the text of
-  <path>. See docs.civicrm.org/dev/en/latest/framework/routing/.
+  Element names: the CiviCRM routing schema is <menu><item><path/></item></menu>.
+  There is no <route> element — a route is declared with <item>, and the URL is
+  the text of <path>.
+  https://docs.civicrm.org/dev/en/latest/framework/routing/
 
-  NOTE on path parameters: CiviCRM's route table is flat. Every core route uses
-  a literal <path> and passes values in the query string (see
-  <path_arguments> in CRM/Core/xml/Menu/Activity.xml). There is no portable
-  cross-CMS syntax for a "{id}" path segment, so the WebID resource route takes
-  its identifier as the "id" query parameter. lane-1 must decide the final
-  DFC-contract mapping; this is tracked as a PRD under-specification.
+  ─────────────────────────────────────────────────────────────────────────
+  RECONCILIATION AGAINST dfc-ldp.yaml (BLK-013, 2026-10-07)
+  ─────────────────────────────────────────────────────────────────────────
+  Three of our previously-declared paths did not exist in the contract and have
+  been corrected. This is a client-visible change and it was necessary: an
+  endpoint at a path the standard does not define is an endpoint no DFC client
+  will call.
 
-  Cross-lane contract: the Civi\Dfc\Http\Page\* classes below are owned by
-  lane-1 (sa-004/sa-005/sa-006, "Protocol foundation") and DO NOT EXIST YET.
-  They are declared here because a route must name a page callback. Until lane-1
-  lands them, the routes are registered but return a class-not-found error when
-  requested. Install/enable is unaffected.
+  1. /platform/webid  →  /webid
+     dfc-ldp.yaml has no /platform/webid. The platform WebID is served at
+     /webid (summary: "Get Platform WebID"), and the examples confirm it:
+     "https://platform.ex/webid". Our path was invented.
 
-  Access model: every route is gated on the "access dfc api" permission
-  (registered in dfc_civicrm_civicrm_permission()). The finer-grained
-  "read dfc data" / "write dfc data" gates are enforced inside the page/handler
-  layer, because CiviCRM's route layer can only express a single permission
-  string per route.
+  2. /persons        →  /persons/{personId}/index
+     There is no /persons container. Persons are addressed individually from the
+     platform root, and the spec says so explicitly: "Persons sit outside any
+     organization: they are addressed from the platform". The description for
+     /organizations/{id} adds "dfc-b:hasMainContact:
+     https://platform.ex/persons/fred-farm/index" — note the /index suffix on
+     every individual resource.
+
+  3. /places         →  /organizations/{organizationId}/physical-places
+     There is no top-level /places. Places are nested under an Organization,
+     with /physical-places (NOT /places) as the segment name, and each entry
+     addressed at .../physical-places/{placeId}/index.
+
+  Also removed: /agents. dfc-ldp.yaml declares no /agents path, and Agent is a
+  superclass in the schema rather than a container. Resolving "all agents" was
+  our own invention; the contract does not offer it. The in-scope Agent
+  abstraction is handled in the adapter layer (per PRD-002), not as a route.
+
+  ─────────────────────────────────────────────────────────────────────────
+  PATH PARAMETERS — THE INELEGANT BUT NECESSARY PART
+  ─────────────────────────────────────────────────────────────────────────
+  The contract uses OpenAPI path templates: /organizations/{organizationId}.
+  CiviCRM's route table is FLAT. Every core route uses a literal <path> and
+  passes values in the query string — see <path_arguments> in
+  CRM/Core/xml/Menu/Activity.xml. There is no portable cross-CMS syntax for a
+  "{id}" path segment.
+
+  So we register one route per *shape* and take the identifier as a query
+  argument named exactly as the contract's parameter. Concretely:
+      contract  GET /organizations/awesome-farm/index
+      ours      GET /civicrm/dfc/v2/organizations?organizationId=awesome-farm
+  This is a documented divergence, not an oversight: it is what CiviCRM's
+  routing permits across all supported CMS environments, which is the packaging
+  property this extension is built on. Callers must translate. It is recorded as
+  an interoperability cost in PRD-002's risk table and is worth raising with the
+  DFC working group, since a DFC client written against the OpenAPI will not
+  work unmodified against any CiviCRM extension.
+
+  The `{...}/index` suffix is likewise dropped: it is a contract-level convention
+  for disambiguating a resource from its container, and carries no information a
+  CiviCRM route can use.
+
+  ─────────────────────────────────────────────────────────────────────────
+  REQUIRED HEADER
+  ─────────────────────────────────────────────────────────────────────────
+  Every operation in dfc-ldp.yaml declares x-dfc-version as a REQUIRED header.
+  CiviCRM's route layer cannot assert request headers, so the check lives in the
+  page/handler layer via DfcVersionHeader (sa-006). Do not add it here.
+
+  ─────────────────────────────────────────────────────────────────────────
+  ACCESS MODEL
+  ─────────────────────────────────────────────────────────────────────────
+  Every route is gated on the "access dfc api" permission (registered in
+  dfc_civicrm_civicrm_permission()). Finer-grained "read dfc data" /
+  "write dfc data" gating is enforced inside the page/handler layer, because
+  CiviCRM's route layer expresses only a single permission string per route.
+
+  Cross-lane contract: the Civi\Dfc\Http\Page\* classes below are owned by lane-3
+  and DO NOT EXIST YET. Routes are registered but return a class-not-found error
+  when requested. Install and enable are unaffected.
 -->
 <menu>
 
   <!-- ==================================================================== -->
-  <!-- Discovery surface                                                     -->
+  <!-- Discovery surface — dfc-ldp.yaml: /webid, /identity-service          -->
+  <!--                                                                       -->
+  <!-- NOTE the path is /webid, not /platform/webid. See reconciliation      -->
+  <!-- note 1 above.                                                          -->
   <!-- ==================================================================== -->
 
   <item>
-    <path>civicrm/dfc/v2/platform/webid</path>
+    <path>civicrm/dfc/v2/webid</path>
     <title>DFC Platform WebID</title>
-    <desc>The platform's own WebID document. Public by contract, but still permission-gated: the export allow-list (default: not-exported) decides what it discloses, and that allow-list is a separate artifact.</desc>
+    <desc>The platform's own WebID document (contract path /webid). MUST advertise the supported protocol and ontology versions and link to the Identity Service. Public by contract, but still permission-gated: the export allow-list (default: not-exported) decides what it discloses, and that allow-list is a separate artefact. Requires the x-dfc-version header, validated in the handler layer.</desc>
     <page_callback>Civi\Dfc\Http\Page\PlatformWebId</page_callback>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
@@ -53,7 +112,7 @@
   <item>
     <path>civicrm/dfc/v2/identity-service</path>
     <title>DFC Identity Service</title>
-    <desc>DFC Identity Service endpoint. Returns a 303 to the authenticated subject's WebID for a valid OIDC access token. ID tokens must never be accepted here.</desc>
+    <desc>DFC Identity Service (contract path /identity-service, HEAD). Resolves a valid OIDC access token to the caller's public WebID and answers 303 See Other with Location pointing at it. The token MUST carry the user's email address; if the WebID does not exist it is created before returning. ID tokens must never be accepted here. The contract declares this operation as HEAD, which is what CiviCRM's routing supports directly.</desc>
     <page_callback>Civi\Dfc\Http\Page\IdentityService</page_callback>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
@@ -62,12 +121,18 @@
     <weight>901</weight>
   </item>
 
+  <!-- ==================================================================== -->
+  <!-- Per-user WebID documents — dfc-ldp.yaml: /users/{userId}/...        -->
+  <!--                                                                       -->
+  <!-- One route per shape; userId arrives as a query argument.             -->
+  <!-- ==================================================================== -->
+
   <item>
-    <!-- Identifier travels in the "id" query parameter - see the header note. -->
-    <path>civicrm/dfc/v2/webid</path>
-    <title>DFC WebID</title>
-    <desc>Resolves a single WebID (platform, user or organization) identified by the "id" query parameter. Serves the WebID profile document plus the private preference and TypeIndex links.</desc>
-    <page_callback>Civi\Dfc\Http\Page\WebId</page_callback>
+    <path>civicrm/dfc/v2/users/webid</path>
+    <title>DFC User WebID</title>
+    <desc>A single user's public WebID profile (contract path /users/{userId}/webid). Identify the user with the "userId" query argument. Links to the private preferences file and the private TypeIndex. Must be publicly readable and served as application/ld+json.</desc>
+    <page_callback>Civi\Dfc\Http\Page\UserWebId</page_callback>
+    <page_arguments>userId</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
@@ -75,20 +140,45 @@
     <weight>902</weight>
   </item>
 
+  <item>
+    <path>civicrm/dfc/v2/users/prefs</path>
+    <title>DFC User Preferences</title>
+    <desc>The user's private preferences document (contract path /users/{userId}/prefs), linked from their WebID via pim:preferencesFile. Identify the user with the "userId" query argument. Private: never exported through the public allow-list.</desc>
+    <page_callback>Civi\Dfc\Http\Page\UserPreferences</page_callback>
+    <page_arguments>userId</page_arguments>
+    <access_callback>CRM_Core_Permission::checkMenu</access_callback>
+    <access_arguments>access dfc api</access_arguments>
+    <is_public>true</is_public>
+    <skipBreadCrumb>true</skipBreadCrumb>
+    <weight>903</weight>
+  </item>
+
+  <item>
+    <path>civicrm/dfc/v2/users/private-type-index</path>
+    <title>DFC Private TypeIndex</title>
+    <desc>The user's private TypeIndex (contract path /users/{userId}/privateTypeIndex), which associates the authenticated identity with its DFC Agent/Enterprise resource via solid:instance. Identify the user with the "userId" query argument. This is the document that ties an OIDC identity to a DFC Agent — the most security-sensitive read in the surface, and it must never disclose anything the export allow-list withholds.</desc>
+    <page_callback>Civi\Dfc\Http\Page\PrivateTypeIndex</page_callback>
+    <page_arguments>userId</page_arguments>
+    <access_callback>CRM_Core_Permission::checkMenu</access_callback>
+    <access_arguments>access dfc api</access_arguments>
+    <is_public>true</is_public>
+    <skipBreadCrumb>true</skipBreadCrumb>
+    <weight>904</weight>
+  </item>
+
   <!-- ==================================================================== -->
-  <!-- LDP containers                                                        -->
+  <!-- Organizations — dfc-ldp.yaml: /organizations, /organizations/{id}   -->
   <!--                                                                       -->
-  <!-- One page class serves every container; the resource is selected by the -->
-  <!-- dfc_container request argument, declared per route via              -->
-  <!-- <page_arguments>. Pagination and ldp:contains bounds belong to lane-1. -->
+  <!-- Container: /organizations. Resource: /organizations/{organizationId}  -->
+  <!-- with GET, PUT and PATCH.                                             -->
   <!-- ==================================================================== -->
 
   <item>
-    <path>civicrm/dfc/v2/agents</path>
-    <title>DFC Agents</title>
-    <desc>LDP Basic Container of DFC Agent / Who_Subject resources.</desc>
+    <path>civicrm/dfc/v2/organizations</path>
+    <title>DFC Organizations</title>
+    <desc>LDP Basic Container of DFC Organization resources (contract path /organizations). Emits ldp:contains over the page of members and MUST stay bounded — an unbounded result set is never materialised to build a container. Paginated with the limit and offset query arguments, and Link rel=next/prev.</desc>
     <page_callback>Civi\Dfc\Http\Page\LdpContainer</page_callback>
-    <page_arguments>dfc_container=agents</page_arguments>
+    <page_arguments>dfc_container=organizations</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
@@ -97,11 +187,11 @@
   </item>
 
   <item>
-    <path>civicrm/dfc/v2/organizations</path>
-    <title>DFC Organizations</title>
-    <desc>LDP Basic Container of DFC Organization resources.</desc>
-    <page_callback>Civi\Dfc\Http\Page\LdpContainer</page_callback>
-    <page_arguments>dfc_container=organizations</page_arguments>
+    <path>civicrm/dfc/v2/organizations/resource</path>
+    <title>DFC Organization</title>
+    <desc>A single DFC Organization (contract path /organizations/{organizationId}, GET/PUT/PATCH). Identify the organization with the "organizationId" query argument. Native CiviCRM Contact with contact_type=Organization is the backing record; the DFC semantic @id comes from the identity map, never from the display name or the numeric CiviCRM id.</desc>
+    <page_callback>Civi\Dfc\Http\Page\OrganizationResource</page_callback>
+    <page_arguments>organizationId</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
@@ -109,30 +199,117 @@
     <weight>911</weight>
   </item>
 
+  <!-- ==================================================================== -->
+  <!-- Organization-scoped containers                                       -->
+  <!--                                                                       -->
+  <!-- All are nested under an Organization in the contract, and all use    -->
+  <!-- kebab-case segments. One route shape each; organizationId is a      -->
+  <!-- query argument. These cover the in-scope non-commerce surface only.  -->
+  <!-- Product, Order, catalog, certification and route paths in the       -->
+  <!-- contract are deliberately NOT declared here — see PRD-002 §1.         -->
+  <!-- ==================================================================== -->
+
   <item>
-    <path>civicrm/dfc/v2/persons</path>
-    <title>DFC Persons</title>
-    <desc>LDP Basic Container of DFC Person resources.</desc>
+    <path>civicrm/dfc/v2/organizations/addresses</path>
+    <title>DFC Organization Addresses</title>
+    <desc>LDP Basic Container of Address resources belonging to an Organization (contract path /organizations/{organizationId}/addresses). Backed by native CiviCRM Address records; DFC semantic linkage is kept separately in the identity map.</desc>
     <page_callback>Civi\Dfc\Http\Page\LdpContainer</page_callback>
-    <page_arguments>dfc_container=persons</page_arguments>
+    <page_arguments>dfc_container=addresses</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
     <skipBreadCrumb>true</skipBreadCrumb>
-    <weight>912</weight>
+    <weight>920</weight>
   </item>
 
   <item>
-    <path>civicrm/dfc/v2/places</path>
-    <title>DFC Places</title>
-    <desc>LDP Basic Container of DFC Place / PhysicalPlace / VirtualPlace resources.</desc>
+    <path>civicrm/dfc/v2/organizations/physical-places</path>
+    <title>DFC Physical Places</title>
+    <desc>LDP Basic Container of PhysicalPlace resources (contract path /organizations/{organizationId}/physical-places). NOTE the segment is physical-places, not places — there is no top-level /places in the contract. Place metadata CiviCRM cannot express natively lives in extension-owned representation metadata rather than in an Address row.</desc>
     <page_callback>Civi\Dfc\Http\Page\LdpContainer</page_callback>
-    <page_arguments>dfc_container=places</page_arguments>
+    <page_arguments>dfc_container=physical-places</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
     <skipBreadCrumb>true</skipBreadCrumb>
-    <weight>913</weight>
+    <weight>921</weight>
+  </item>
+
+  <item>
+    <path>civicrm/dfc/v2/organizations/affiliated-to</path>
+    <title>DFC Affiliations</title>
+    <desc>LDP Basic Container of organizations this organization is affiliated with (contract path /organizations/{organizationId}/affiliated-to). Backing store is native CiviCRM Relationship rows with deterministic DFC predicate mapping and explicit inverses.</desc>
+    <page_callback>Civi\Dfc\Http\Page\LdpContainer</page_callback>
+    <page_arguments>dfc_container=affiliated-to</page_arguments>
+    <access_callback>CRM_Core_Permission::checkMenu</access_callback>
+    <access_arguments>access dfc api</access_arguments>
+    <is_public>true</is_public>
+    <skipBreadCrumb>true</skipBreadCrumb>
+    <weight>922</weight>
+  </item>
+
+  <item>
+    <path>civicrm/dfc/v2/organizations/social-medias</path>
+    <title>DFC Social Media</title>
+    <desc>LDP Basic Container of SocialMedia links (contract path /organizations/{organizationId}/social-medias). Native CiviCRM Website rows are used only where the semantics fit; a social handle is never forced into a URL field. The container member key in the contract is {name}.</desc>
+    <page_callback>Civi\Dfc\Http\Page\LdpContainer</page_callback>
+    <page_arguments>dfc_container=social-medias</page_arguments>
+    <access_callback>CRM_Core_Permission::checkMenu</access_callback>
+    <access_arguments>access dfc api</access_arguments>
+    <is_public>true</is_public>
+    <skipBreadCrumb>true</skipBreadCrumb>
+    <weight>923</weight>
+  </item>
+
+  <item>
+    <path>civicrm/dfc/v2/organizations/customer-categories</path>
+    <title>DFC Customer Categories</title>
+    <desc>LDP Basic Container of customer categories defined by an Organization (contract path /organizations/{organizationId}/customer-categories). Read-only in the contract (GET only). Controlled vocabulary values are preserved as URI strings; labels are presentation only.</desc>
+    <page_callback>Civi\Dfc\Http\Page\LdpContainer</page_callback>
+    <page_arguments>dfc_container=customer-categories</page_arguments>
+    <access_callback>CRM_Core_Permission::checkMenu</access_callback>
+    <access_arguments>access dfc api</access_arguments>
+    <is_public>true</is_public>
+    <skipBreadCrumb>true</skipBreadCrumb>
+    <weight>924</weight>
+  </item>
+
+  <!-- ==================================================================== -->
+  <!-- Persons — dfc-ldp.yaml: /persons/{personId}/index                    -->
+  <!--                                                                       -->
+  <!-- NO /persons CONTAINER EXISTS. The spec states: "Persons sit outside    -->
+  <!-- any organization: they are addressed from the platform". Our previous -->
+  <!-- /persons container was invented and has been removed.                 -->
+  <!-- ==================================================================== -->
+
+  <item>
+    <path>civicrm/dfc/v2/persons/resource</path>
+    <title>DFC Person</title>
+    <desc>A single DFC Person (contract path /persons/{personId}/index, GET/PUT/PATCH/DELETE). Identify the person with the "personId" query argument. Backing record is a native CiviCRM Contact with contact_type=Individual. Persons sit outside any Organization and have no container of their own in the contract.</desc>
+    <page_callback>Civi\Dfc\Http\Page\PersonResource</page_callback>
+    <page_arguments>personId</page_arguments>
+    <access_callback>CRM_Core_Permission::checkMenu</access_callback>
+    <access_arguments>access dfc api</access_arguments>
+    <is_public>true</is_public>
+    <skipBreadCrumb>true</skipBreadCrumb>
+    <weight>930</weight>
+  </item>
+
+  <!-- ==================================================================== -->
+  <!-- Platform-level resources                                              -->
+  <!-- ==================================================================== -->
+
+  <item>
+    <path>civicrm/dfc/v2/phone-numbers</path>
+    <title>DFC Phone Number</title>
+    <desc>A single PhoneNumber (contract path /phone-numbers/{phoneNumberId}/index, GET only). Identify the number with the "phoneNumberId" query argument. PhoneNumbers are nested property values, not container members, so this is a flat resource path in the contract and stays one here. Backing record is a native CiviCRM Phone.</desc>
+    <page_callback>Civi\Dfc\Http\Page\PhoneNumberResource</page_callback>
+    <page_arguments>phoneNumberId</page_arguments>
+    <access_callback>CRM_Core_Permission::checkMenu</access_callback>
+    <access_arguments>access dfc api</access_arguments>
+    <is_public>true</is_public>
+    <skipBreadCrumb>true</skipBreadCrumb>
+    <weight>940</weight>
   </item>
 
 </menu>
