@@ -274,7 +274,16 @@ jobs:
           # Stripping in one place and rejecting in the other would leave a state
           # where the gate passes and the archive name does not match the release.
           VERSION="${TAG}"
-          ARCHIVE="build/dfc_civicrm-${VERSION}.tar.gz"
+          KEY="$(sed -n -E 's/.*<extension[^>]*key="([^"]+)".*/\1/p' info.xml | head -n 1)"
+          if [ -z "${KEY}" ]; then
+            echo "::error::could not read key=\"...\" off <extension> in info.xml"
+            exit 1
+          fi
+          # Same versioned-subdirectory layout ci.yml asserts. A literal
+          # "build/dfc_civicrm-${VERSION}.tar.gz" would never have existed here
+          # either, so the release would have failed after the tag was pushed -
+          # a much worse time to find out than ci.yml finding it first.
+          ARCHIVE="build/${KEY}-${VERSION}/dfc_civicrm-${VERSION}.tar.gz"
           test -f "${ARCHIVE}"
 
           # Pull this version's section out of the changelog, minus the heading

@@ -733,9 +733,25 @@ write_archive() {
 
     [ -f "${target}" ] || die "expected archive at ${target} and it is not there"
 
+    # Two copies, deliberately. The one inside the version directory is the
+    # self-contained release payload - unpack it and the checksum sits beside
+    # the archive. The one at the output root is the contract the docs, ci.yml
+    # and release.yml all use:
+    #
+    #     ( cd build && sha256sum --check SHA256SUMS )
+    #
+    # which resolves paths relative to build/, so this copy must record the
+    # version directory as a path prefix. Writing only the nested copy is what
+    # made CI fail on its first ever run, while every local check passed -
+    # local verification had only ever compared the archive's own hash.
     (
         cd -- "${RUN_DIR}" || exit 1
         sha256sum "${ARCHIVE_NAME}" > SHA256SUMS
+    )
+
+    (
+        cd -- "${OUTPUT_DIR}" || exit 1
+        sha256sum "${EXTENSION_KEY}-${VERSION}/${ARCHIVE_NAME}" > SHA256SUMS
     )
 
     printf '%s\n' "${FORCE_NOTE}" > "${RUN_DIR}/BUILD-METADATA.txt"
@@ -748,6 +764,11 @@ source_date_epoch=${SOURCE_DATE_EPOCH}
 gnu_tar=${GNU_TAR}
 connector_vendored=$([ "${NO_VENDOR}" -eq 1 ] && echo no || echo yes)
 EOF
+
+    # Same reason as the second SHA256SUMS copy: ci.yml and release.yml both
+    # upload build/BUILD-METADATA.txt from the output root, and both would have
+    # silently attached nothing.
+    cp -- "${RUN_DIR}/BUILD-METADATA.txt" "${OUTPUT_DIR}/BUILD-METADATA.txt"
 
     info ""
     info "Archive:  ${target}"

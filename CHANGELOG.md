@@ -134,6 +134,17 @@ agree, because a comment stating the invariant did not prevent the drift.
   and `<key>.php` exists — and both real failures were re-verified against a
   simulated `dfc-civicrm` checkout.
 
+- **`build-release.sh` now writes `SHA256SUMS` and `BUILD-METADATA.txt` to the
+  output root as well as to the version directory.** `ci.yml` and `release.yml`
+  both read and upload them from `build/`, and both would have silently attached
+  nothing — an upload step with a path that never exists does not fail loudly.
+- **Three workflow paths that never existed are fixed.** Both workflows assumed a
+  flat `build/dfc_civicrm-<version>.tar.gz`, but the script nests the archive
+  under `build/<key>-<version>/`. CI failed at the `test -f` on its very first
+  run; `release.yml` had the same defect and would have failed *after a tag was
+  pushed*. Both now derive the key and version from `info.xml` instead of
+  repeating literals, so a version bump cannot break them again.
+
 ### Notes
 
 - **CI has now run for the first time**, on PHP 8.5.11 among others, and it

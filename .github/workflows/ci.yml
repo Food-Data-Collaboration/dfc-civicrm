@@ -455,7 +455,13 @@ jobs:
           #   $ echo $?
           #   141
           VERSION="$(sed -n -E 's/^[[:space:]]*<version>([^<]+)<\/version>[[:space:]]*$/\1/p' info.xml | head -n 1)"
-          ARCHIVE="build/dfc_civicrm-${VERSION}.tar.gz"
+          KEY="$(sed -n -E 's/.*<extension[^>]*key="([^"]+)".*/\1/p' info.xml | head -n 1)"
+          # build-release.sh writes <output-dir>/<key>-<version>/<archive>, not a
+          # flat <output-dir>/<archive>. Deriving both components from info.xml
+          # keeps this from silently breaking on a version bump: the previous
+          # literal path never existed, and CI failed on its first run at the
+          # `test -f` below with no output explaining why.
+          ARCHIVE="build/${KEY}-${VERSION}/dfc_civicrm-${VERSION}.tar.gz"
           test -f "${ARCHIVE}"
 
           MEMBERS="build/.archive-members.txt"
@@ -536,9 +542,22 @@ jobs:
           VERSION="$(sed -n -E 's/^[[:space:]]*<version>([^<]+)<\/version>[[:space:]]*$/\1/p' info.xml | head -n 1)"
           ARCHIVE="dfc_civicrm-${VERSION}.tar.gz"
 
-          FIRST="$(sha256sum "build/${ARCHIVE}" | cut -d' ' -f1)"
+          # build-release.sh nests the archive under a version directory, so
+          # both paths are <outdir>/dfc_civicrm-<version>/<archive>. Deriving
+          # the directory from info.xml rather than repeating the literal means
+          # a rename of the key or a version bump cannot silently break this
+          # comparison - the previous hardcoded "build-second/dfc_civicrm/" did
+          # exactly that, and CI never reached this step because an earlier one
+          # exited first.
+          KEY="$(sed -n -E 's/.*<extension[^>]*key="([^"]+)".*/\1/p' info.xml | head -n 1)"
+          if [ -z "${KEY}" ]; then
+            echo "::error::could not read key=\"...\" off <extension> in info.xml"
+            exit 1
+          fi
+
+          FIRST="$(sha256sum "build/${KEY}-${VERSION}/${ARCHIVE}" | cut -d' ' -f1)"
           ./tools/build-release.sh --output-dir build-second
-          SECOND="$(sha256sum "build-second/dfc_civicrm/${ARCHIVE}" | cut -d' ' -f1)"
+          SECOND="$(sha256sum "build-second/${KEY}-${VERSION}/${ARCHIVE}" | cut -d' ' -f1)"
 
           if [ "${FIRST}" != "${SECOND}" ]; then
             echo "::error::build is not reproducible: ${FIRST} vs ${SECOND}"
