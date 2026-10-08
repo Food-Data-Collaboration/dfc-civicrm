@@ -191,22 +191,36 @@ if [ -z "${EXTENSION_KEY}" ]; then
     die "could not read key=\"...\" off the root <extension> element in ${INFO_XML}"
 fi
 
-# 0. The extension key must equal the directory name, because
+# 0. The extension key names the DIRECTORY CiviCRM installs into, because
 # CRM_Extension_Info::parse() reads it and CiviCRM resolves the extension from
 # <ext-dir>/<key>/<file>.php. This is the one thing that silently "works" in
 # development and fails on install.
-EXPECTED_DIR="$(basename -- "$(cd -- "${REPO_ROOT}" && pwd -P)")"
-if [ "${EXTENSION_KEY}" != "${EXPECTED_DIR}" ]; then
-    fail "info.xml key is '${EXTENSION_KEY}' but the directory is '${EXPECTED_DIR}'. CiviCRM resolves <ext-dir>/<key>/, so these must be equal."
+#
+# Note what is deliberately NOT asserted: that the key equals the git
+# repository name. Those are different namespaces. This repository is
+# "dfc-civicrm" on GitHub (hyphen, lowercase, the only form GitHub allows)
+# while the key is "dfc_civicrm" (underscore), and CiviCRM installs by key
+# regardless of what the remote is called. An earlier version of this check
+# compared the key against the checkout directory, which passed locally because
+# the working copy happened to be named dfc_civicrm/ and failed on the GitHub
+# runner, where actions/checkout names the directory after the repository.
+#
+# What does have to hold is that the key names a directory we can actually
+# produce and that it is consistent with <file>, since both are read off the
+# same root element.
+if [ "${EXTENSION_KEY}" != "${EXTENSION_FILE}" ]; then
+    fail "info.xml key is '${EXTENSION_KEY}' but <file> is '${EXTENSION_FILE}'. Both name the install directory <ext-dir>/<key>/ and must be equal."
 else
-    pass "extension key matches directory name (${EXTENSION_KEY})"
+    pass "extension key and <file> agree, so <ext-dir>/${EXTENSION_KEY}/ is well-formed (${EXTENSION_KEY})"
 fi
 
-if [ "${EXTENSION_FILE}" != "${EXTENSION_KEY}" ]; then
-    fail "info.xml <file> is '${EXTENSION_FILE}' but key is '${EXTENSION_KEY}'. CRM_Extension_Info::parse() reads both off the root element."
+if [ ! -f "${REPO_ROOT}/${EXTENSION_KEY}.php" ]; then
+    fail "info.xml key is '${EXTENSION_KEY}' but ${REPO_ROOT}/${EXTENSION_KEY}.php does not exist. CiviCRM loads <ext-dir>/<key>/<file>.php and would fatal on a missing entry point."
 else
-    pass "<file> matches <key> (${EXTENSION_FILE})"
+    pass "extension entry point exists (${EXTENSION_KEY}.php)"
 fi
+
+
 
 # 1. info.xml <version> is SemVer.
 if printf '%s' "${VERSION}" | grep -q -E "${SEMVER_RE}"; then

@@ -113,8 +113,32 @@ agree, because a comment stating the invariant did not prevent the drift.
 - `SECURITY.md` now prefers GitHub private advisory reporting over the shared
   inbox, which is a general address rather than a monitored security mailbox.
 
+### Fixed
+
+- **The `import()` defect we reported as DFC-LinkML#36 was fixed upstream in
+  v2.0.7** (released 2026-10-08, the same day CI first ran and caught it), so
+  `ConnectorContractTest` was asserting the bug rather than the behaviour. It
+  now pins the sharper contract v2.0.7 actually provides: malformed input
+  *throws* `JsonException`, while well-formed-but-graphless JSON still returns
+  `[]`. The second half is the part that remains ours — `JsonLdParseStage` must
+  keep its own `@context` checking, because `import()` can catch a syntax error
+  but still cannot tell us "you sent JSON, it just was not DFC".
+- **`check-release-metadata.sh` no longer fails on CI.** It compared the
+  extension key against the *checkout directory name*, which passed locally
+  (the working copy is `dfc_civicrm/`) and failed on a GitHub runner, where
+  `actions/checkout` names the directory after the repository
+  (`dfc-civicrm`). Those are different namespaces: the repository is
+  `dfc-civicrm` because GitHub permits only lowercase and hyphens, while the
+  key is `dfc_civicrm`, and CiviCRM installs by key regardless of the remote's
+  name. The check now asserts what actually matters — key and `<file>` agree,
+  and `<key>.php` exists — and both real failures were re-verified against a
+  simulated `dfc-civicrm` checkout.
+
 ### Notes
 
+- **CI has now run for the first time**, on PHP 8.5.11 among others, and it
+  found both bugs above. Nothing about it is green yet in this release; see
+  the note on PHPUnit below for the remaining work.
 - PHPUnit stays on `10.5` rather than moving to 13. PHPUnit 13 requires
   `php >=8.4.1`, so it cannot run on the 8.1–8.3 legs of the matrix at all.
   PHPUnit 10.5 declares `php >=8.1` with no upper bound, so Composer will

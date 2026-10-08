@@ -76,57 +76,99 @@ final class ConnectorContractTest extends TestCase
     }
 
     /**
-     * DEFECT PINNED (2026-10-02, connector v2.0.5).
+     * FIXED UPSTREAM (2026-10-08, connector v2.0.7 — issue #36, filed by us).
      *
-     * import() does NOT throw for malformed input. It returns an empty array.
-     * That includes input that is not valid JSON at all, and input that is
-     * valid JSON but carries no DFC graph.
+     * This test previously asserted the opposite: that import() silently
+     * returned an empty array for malformed input. v2.0.7 added
+     * JSON_THROW_ON_ERROR and an explicit non-document rejection, so unparseable
+     * input now throws JsonException.
      *
-     * Consequence for us: we cannot treat an empty result as "nothing to do".
-     * A POST body of "{not json" would import as a silent no-op and answer 2xx,
-     * losing the client's data with no error. Our JsonLdParseStage therefore
-     * MUST do its own syntax and @context checking before handing anything to
-     * the connector, and must treat an empty import result as an error rather
-     * than a success.
+     * The split it now enforces is the one worth pinning, and it is sharper
+     * than "throws or not":
+     *
+     *   malformed (unparseable, or parses to a non-document) -> THROWS
+     *   well-formed but carries no DFC graph                  -> []
+     *
+     * Only the second is a silent no-op, and it is the one we still have to
+     * handle ourselves. JsonLdParseStage must therefore keep doing its own
+     * @context checking: import() now catches the syntax error for us, but it
+     * still cannot tell our code "you sent JSON, it just was not DFC".
      *
      * @see BLK-015
      */
     #[Group('upstream-defect')]
-    #[DataProvider('silentEmptyImportCases')]
-    public function testImportReturnsAnEmptyArrayRatherThanThrowing(string $label, string $input): void
+    #[DataProvider('malformedImportCases')]
+    public function testImportThrowsOnMalformedInput(string $label, string $input): void
     {
-        $result = $this->connector->import($input);
+        $this->expectException(\JsonException::class);
 
-        self::assertIsArray($result);
-        self::assertSame([], $result, $label . ': import silently returns an empty array');
+        $this->connector->import($input);
     }
 
     /** @return array<string, array{0: string, 1: string}> */
-    public static function silentEmptyImportCases(): array
+    public static function malformedImportCases(): array
     {
         return [
             'not JSON at all' => ['not JSON at all', '{not json'],
             'empty string' => ['empty string', ''],
-            'valid JSON, no graph' => ['valid JSON, no graph', '{"foo":"bar"}'],
-            'root-level array' => ['root-level array', '[{"@type":"dfc-b:Organization"}]'],
             'JSON null' => ['JSON null', 'null'],
+            'JSON scalar' => ['JSON scalar', '42'],
         ];
     }
 
     /**
-     * The corollary of the defect above, stated as a rule for our own code.
+     * The half of the old defect that is NOT fixed, and is ours to handle.
      *
-     * If import() ever starts throwing on malformed input, this fails and we
-     * revisit JsonLdParseStage rather than leaving a redundant guard in place.
+     * These all parse as JSON documents and are simply not DFC, so import()
+     * returns an empty array rather than complaining. A POST body of
+     * {"foo":"bar"} therefore still imports as a silent no-op, and it is still
+     * JsonLdParseStage's job to reject it with a 400 before we get here.
+     *
+     * @see BLK-015
+     */
+    #[Group('upstream-defect')]
+    #[DataProvider('graphlessImportCases')]
+    public function testGraphlessButWellFormedJsonStillImportsAsAnEmptyArray(string $label, string $input): void
+    {
+        $result = $this->connector->import($input);
+
+        self::assertIsArray($result);
+        self::assertSame([], $result, $label . ': still a silent no-op, so parse-stage validation is still required');
+    }
+
+    /** @return array<string, array{0: string, 1: string}> */
+    public static function graphlessImportCases(): array
+    {
+        return [
+            'valid JSON, no graph' => ['valid JSON, no graph', '{"foo":"bar"}'],
+            'root-level array' => ['root-level array', '[{"@type":"dfc-b:Organization"}]'],
+            'genuinely empty' => ['genuinely empty', '[]'],
+        ];
+    }
+
+    /**
+     * The distinction the old single test could not express, now asserted
+     * directly: malformed and genuinely-empty are no longer the same answer.
+     *
+     * Under connector v2.0.5 they were, which is exactly what made the old
+     * defect dangerous - there was no way for a caller to tell "you sent
+     * nonsense" from "you sent an empty document".
      */
     #[Group('upstream-defect')]
     public function testMalformedInputIsDistinguishableFromAnEmptyDocument(): void
     {
-        $malformed = $this->connector->import('{not json');
         $genuinelyEmpty = $this->connector->import('[]');
 
-        self::assertSame($malformed, $genuinelyEmpty,
-            'if these ever differ, import() gained error reporting and JsonLdParseStage should be simplified');
+        $malformed = null;
+        try {
+            $this->connector->import('{not json');
+        } catch (\JsonException $e) {
+            $malformed = $e;
+        }
+
+        self::assertInstanceOf(\JsonException::class, $malformed,
+            'malformed input must be reported, not folded into the empty-document result');
+        self::assertSame([], $genuinelyEmpty);
     }
 
     public function testPropertyNamesFollowTheCamelCasePredicateLocalName(): void
