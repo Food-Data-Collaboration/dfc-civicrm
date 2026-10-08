@@ -4,13 +4,19 @@
 
 **Do not open a public issue.**
 
-This repository has **no remote yet**, so there is no security advisory page to
-file one against and no issue tracker to keep it out of. Until a remote exists,
-report privately to the maintainer named in `info.xml`. That address is
-currently a placeholder (`maintainers@zoro-jiro-san.invalid`, an RFC 2606
-non-routable TLD), so **there is no working route to report a vulnerability
-today**. Establishing one is a release blocker, tracked alongside the missing
-remote in `README.md`.
+Report privately to the maintainer named in `info.xml`
+(`hello@fooddatacollaboration.org.uk`), or use GitHub's private reporting on
+<https://github.com/Food-Data-Collaboration/dfc-civicrm/security/advisories/new>.
+
+**Prefer the advisory route.** It keeps the report out of the public issue
+tracker, which is the whole point of not opening an issue, and it lets the
+maintainer stage disclosure.
+
+The email address is the organisation's shared contact address, not a dedicated
+security mailbox. It is routable and monitored, which is a real improvement on
+the RFC 2606 placeholder that stood here until 2026-10-08 — but it is a general
+inbox, so a dedicated security address and a `security.txt` would be better.
+That gap is tracked in `README.md`.
 
 What a working route must satisfy before any release:
 

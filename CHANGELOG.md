@@ -89,6 +89,30 @@ agree, because a comment stating the invariant did not prevent the drift.
   has ever run anything, because the repository has no remote and GitHub Actions
   has therefore never executed. Corrected above.
 
+### Added
+
+- **`LICENSE`** — the full AGPL-3.0 text. `info.xml` and `composer.json` have
+  declared `AGPL-3.0-or-later` since 0.1.0 while the repository contained no
+  licence file at all, which is a §4 compliance gap for a distributed work and
+  blocks Extensions Directory listing. Taken from the SPDX canonical copy; its
+  operative terms were verified byte-identical against a second independent copy
+  before adding, and the one `{{ year }}  {{ organization }}` placeholder — in
+  the "How to Apply" appendix, not in any operative clause — is filled with
+  `2026  Food-Data-Collaboration`.
+
+### Changed
+
+- **Maintainer metadata is now real.** `<author>` was `zoro-jiro-san` with an
+  RFC 2606 `maintainers@zoro-jiro-san.invalid` address and repository URLs
+  pointing at a repository that did not exist. Now `Food Data Collaboration` /
+  `hello@fooddatacollaboration.org.uk`, with URLs at
+  `Food-Data-Collaboration/dfc-civicrm`, which is the remote this repository
+  gained the same day. `composer.json`'s `name` is corrected to
+  `food-data-collaboration/dfc-civicrm` to match. This is what made
+  `SECURITY.md`'s reporting route non-functional rather than merely untidy.
+- `SECURITY.md` now prefers GitHub private advisory reporting over the shared
+  inbox, which is a general address rather than a monitored security mailbox.
+
 ### Notes
 
 - PHPUnit stays on `10.5` rather than moving to 13. PHPUnit 13 requires
@@ -217,5 +241,5 @@ the extension shell, verified by unit tests only.
   pagination parameter names are all provisional (BLK-008 … BLK-011). They may
   change in a way that breaks clients.
 
-[Unreleased]: https://github.com/zoro-jiro-san/dfc-civicrm/compare/0.1.0...HEAD
-[0.1.0]: https://github.com/zoro-jiro-san/dfc-civicrm/releases/tag/0.1.0
+[Unreleased]: https://github.com/Food-Data-Collaboration/dfc-civicrm/compare/0.1.0...HEAD
+[0.1.0]: https://github.com/Food-Data-Collaboration/dfc-civicrm/releases/tag/0.1.0

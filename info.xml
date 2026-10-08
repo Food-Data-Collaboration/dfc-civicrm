@@ -29,16 +29,24 @@
   <description>Exposes the DFC v2 JSON-LD / LDP / WebID HTTP interface from a CiviCRM installation and maps DFC v2 identities and relationships onto native CiviCRM entities.</description>
   <license>AGPL-3.0-or-later</license>
   <maintainer>
-    <!-- TODO(sa-007 follow-up): the repository has no remote yet, so the URLs
-         and the maintainer address below are placeholders and must be replaced
-         before any release or Extensions Directory submission (lane-5 / CP-7).
-         `.invalid` is the RFC 2606 reserved TLD: guaranteed non-routable. -->
-    <author>zoro-jiro-san</author>
-    <email>maintainers@zoro-jiro-san.invalid</email>
+    <!--
+      Real, routable values since 2026-10-08, when the repository gained a
+      remote at Food-Data-Collaboration/dfc-civicrm. They were previously
+      `zoro-jiro-san` with an RFC 2606 `.invalid` address, which guaranteed
+      that SECURITY.md's reporting route and any support request would bounce.
+
+      The address below is the organisation's published contact address rather
+      than an individual's. That is deliberate - a public repository should not
+      name a person who has not agreed to be a named point of contact - but it
+      does mean security reports land in a shared inbox. Replace with a
+      dedicated security address if the org later creates one.
+    -->
+    <author>Food Data Collaboration</author>
+    <email>hello@fooddatacollaboration.org.uk</email>
   </maintainer>
   <urls>
-    <url desc="Main Extension Page">https://github.com/zoro-jiro-san/dfc-civicrm</url>
-    <url desc="Source">https://github.com/zoro-jiro-san/dfc-civicrm</url>
+    <url desc="Main Extension Page">https://github.com/Food-Data-Collaboration/dfc-civicrm</url>
+    <url desc="Source">https://github.com/Food-Data-Collaboration/dfc-civicrm</url>
     <url desc="Licensing">https://www.gnu.org/licenses/agpl-3.0.html</url>
   </urls>
   <releaseDate>2026-10-01</releaseDate>
