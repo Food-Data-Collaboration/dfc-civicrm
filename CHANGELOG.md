@@ -145,6 +145,17 @@ agree, because a comment stating the invariant did not prevent the drift.
   pushed*. Both now derive the key and version from `info.xml` instead of
   repeating literals, so a version bump cannot break them again.
 
+- **`#[CoversClass(ValidationRun::class)]` had no `use` statement.** The test's own
+  namespace is `Civi\Dfc\Test\Validation`, so the bare name resolved to
+  `Civi\Dfc\Test\Validation\ValidationRun` — a class that has never existed.
+  Every other `CoversClass` on that class is properly imported, so it was one
+  omission in a list that otherwise looked uniform. PHPUnit evaluates
+  `CoversClass` only when a coverage driver is loaded, which is why 1137 tests
+  passed locally and only the coverage job failed. `tools/preflight.sh` now
+  resolves every `CoversClass` target by reflection — no driver required — and
+  was verified by removing the import again and confirming it reproduces the
+  original message and exits 1.
+
 ### Notes
 
 - **CI has now run for the first time**, on PHP 8.5.11 among others, and it

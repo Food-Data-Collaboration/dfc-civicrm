@@ -15,6 +15,7 @@ use Civi\Dfc\V2\Validation\TurtleShapeParser;
 use Civi\Dfc\V2\Validation\ValidationContext;
 use Civi\Dfc\V2\Validation\ValidationPipeline;
 use Civi\Dfc\V2\Validation\ValidationResult;
+use Civi\Dfc\V2\Validation\ValidationRun;
 use Civi\Dfc\V2\Validation\ValidationStage;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -36,6 +37,13 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(ValidationRun::class)]
 #[CoversClass(ValidationResult::class)]
 #[CoversClass(ValidationStage::class)]
+// Every other CoversClass above is imported with `use Civi\Dfc\V2\Validation\…`.
+// ValidationRun was not, so the bare name resolved in THIS file's namespace to
+// Civi\Dfc\Test\Validation\ValidationRun - a class that does not exist anywhere.
+// PHPUnit only resolves CoversClass targets when a coverage driver is active, so
+// the suite passed 1137/1137 locally and the coverage job failed with "Class …
+// is not a valid target for code coverage". The import below is the fix; the
+// reference above then resolves to the real Civi\Dfc\V2\Validation\ValidationRun.
 final class ValidationPipelineTest extends TestCase
 {
     private DfcReleaseConfig $release;

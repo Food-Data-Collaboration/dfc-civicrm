@@ -271,6 +271,59 @@ else
     fail "PHP lint errors: ${lint_out}"
 fi
 
+# ---- CoversClass targets must resolve --------------------------------------
+#
+# PHPUnit only evaluates #[CoversClass] when a coverage driver is loaded, so a
+# dangling reference is invisible to a plain `phpunit` run - which is how
+# `ValidationRun::class` went unqualified in a test whose own namespace was
+# Civi\Dfc\Test\Validation, resolving to a class that has never existed. The
+# suite passed; only the coverage job failed. Reflection resolves every target
+# here with no driver needed, so this catches it locally.
+dangling="$(
+    cd "${REPO_ROOT}" || exit 1
+    php -r '
+        require "vendor/autoload.php";
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator(__DIR__ . "/tests", FilesystemIterator::SKIP_DOTS)
+        );
+        $found = [];
+        foreach ($files as $file) {
+            if ($file->getExtension() !== "php") {
+                continue;
+            }
+            $path = $file->getPathname();
+            $before = get_declared_classes();
+            require_once $path;
+            $after = array_diff(get_declared_classes(), $before);
+            foreach ($after as $class) {
+                try {
+                    $r = new ReflectionClass($class);
+                } catch (Throwable) {
+                    continue;
+                }
+                if (strpos($class, "Civi\\Dfc\\Test\\") !== 0 || strpos($class, "TestCase") !== false) {
+                    continue;
+                }
+                foreach ($r->getAttributes(PHPUnit\Framework\Attributes\CoversClass::class) as $attr) {
+                    $target = $attr->getArguments()[0];
+                    if (!class_exists($target) && !interface_exists($target) && !enum_exists($target)) {
+                        $found[] = sprintf("%s: CoversClass -> %s does not exist", basename($path), $target);
+                    }
+                }
+            }
+        }
+        echo implode("\n", array_unique($found));
+    ' 2>/dev/null || true
+)"
+if [ -z "${dangling}" ]; then
+    ok "every CoversClass target resolves (checked by reflection, no coverage driver needed)"
+else
+    fail "CoversClass targets that do not resolve. These pass a plain phpunit run because
+   PHPUnit only evaluates the attribute when a coverage driver is loaded, so
+   only the coverage job would ever notice.
+${dangling}"
+fi
+
 # --- 5. packaging ----------------------------------------------------------
 printf '\nPackaging\n'
 if [ ! -x "${SCRIPT_DIR}/build-release.sh" ]; then
