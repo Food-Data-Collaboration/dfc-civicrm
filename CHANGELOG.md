@@ -35,7 +35,13 @@ is `@since 6.9` and declaring it would raise the floor to 6.9.
 
 ### What "supported" means here, honestly
 
-**Tested:** PHP 8.1–8.4 against the unit suite, with no CiviCRM involved.
+**Tested: PHP 8.1 only** — the one interpreter available in this project's
+environment. The 1135-test unit suite passes there.
+
+**Declared but not yet executed: PHP 8.2, 8.3, 8.4, 8.5.** The CI matrix that
+covers them has never run, because the repository has no remote configured. An
+earlier version of this file claimed "Tested: PHP 8.1–8.4"; that was false on
+both counts — 8.1–8.4 was never run, and the file is not evidence.
 
 **Not tested:** any CiviCRM version. There is no CiviCRM instance in this
 project's environment (BLK-005), so nothing has exercised install, upgrade,
@@ -46,14 +52,52 @@ run.
 
 ## Supported PHP versions
 
-`8.1`, `8.2`, `8.3`, `8.4`, mirroring `<php_compatibility>` in `info.xml`
-exactly. CI runs the unit suite on each.
+`8.1`, `8.2`, `8.3`, `8.4`, `8.5`, mirroring `<php_compatibility>` in
+`info.xml` exactly. CI runs the unit suite on each — and see the honesty note
+above: the matrix has been written but never executed.
+
+`<php_compatibility>` is an **allow-list, not a floor.** CiviCRM's docs give
+`<compatibility>` (CiviCRM versions) forward-compatibility semantics — "`<ver>`
+elements imply forward compatibility" — and explicitly do **not** give it to
+`<php_compatibility>`, where they say "Each `<ver>` child element should only
+contain a single compatible version of PHP" and "It is not currently possible to
+specify a 'maximum compatible version'". A PHP version absent from the list is
+one this extension refuses, so the highest entry is a hard ceiling.
+
+That ceiling was 8.4 until 2026-10-08, because sa-007 copied the reference
+`info.xml` from docs.civicrm.org — which itself lists only 8.1–8.4 — without
+checking it against what CiviCRM actually supports. `tools/preflight.sh` now
+asserts the declared list, the CI matrix and `composer.json`'s PHP floor all
+agree, because a comment stating the invariant did not prevent the drift.
 
 ---
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **PHP 8.5 support declared.** `<php_compatibility>` listed only 8.1–8.4, which
+  — because that element is an allow-list rather than a floor — meant a site on
+  PHP 8.5 was told this extension was incompatible. Added `<ver>8.5</ver>` and
+  `'8.5'` to the CI matrix; the coverage job moved to 8.5 so it measures a
+  version people will actually install.
+- **The drift that let that happen is now guarded.** `tools/preflight.sh` fails
+  if `<php_compatibility>`, the CI matrix and `composer.json`'s PHP floor
+  disagree. Verified by reverting `info.xml` alone and confirming preflight
+  exits 1 with both version lists printed.
+- **A false claim in this changelog.** It said "Tested: PHP 8.1–8.4". Only 8.1
+  has ever run anything, because the repository has no remote and GitHub Actions
+  has therefore never executed. Corrected above.
+
+### Notes
+
+- PHPUnit stays on `10.5` rather than moving to 13. PHPUnit 13 requires
+  `php >=8.4.1`, so it cannot run on the 8.1–8.3 legs of the matrix at all.
+  PHPUnit 10.5 declares `php >=8.1` with no upper bound, so Composer will
+  install it on 8.5; the open question is whether it *runs* cleanly there.
+  Static checks found no 8.2–8.5 breakers in `Civi/` (no dynamic properties,
+  no implicitly-nullable parameters, no `E_STRICT`), but that is a static check,
+  not an execution.
 
 ## [0.1.0] - 2026-10-01
 

@@ -18,6 +18,14 @@ has run. This is the single most common confusion for a new contributor.
 `composer install` needs the `ext-dom`, `ext-json`, `ext-libxml` and
 `ext-mbstring` PHP extensions. PHPUnit 10.5 requires PHP 8.1 or later.
 
+Before claiming support for a PHP version, add it to **both**
+`<php_compatibility>` in `info.xml` and the matrix in
+`.github/workflows/ci.yml`. `tools/preflight.sh` fails if the two disagree, or
+if `composer.json`'s PHP floor is above the lowest declared version. That element
+is an allow-list rather than a floor — a version absent from it is one the
+extension refuses to install on — so omitting one does not degrade gracefully, it
+locks users out.
+
 ### Why the unit suite runs without a CMS
 
 `tests/phpunit/bootstrap.php` loads only `vendor/autoload.php`. No CiviCRM

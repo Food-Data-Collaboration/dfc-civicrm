@@ -50,11 +50,33 @@
   <compatibility>
     <ver>5.74</ver>
   </compatibility>
+  <!--
+    Every supported PHP version must be listed individually. Unlike
+    <compatibility> (CiviCRM), this element has NO forward-compatibility
+    semantics: the docs state "<ver> elements imply forward compatibility" only
+    for <compatibility>, and for PHP they say the opposite - "Each <ver> child
+    element should only contain a single compatible version of PHP" and "It is
+    not currently possible to specify a 'maximum compatible version'".
+    So this list is a hard allow-list and 8.4 was acting as a CEILING: a site on
+    PHP 8.5 would be told this extension is incompatible.
+
+    8.5 added 2026-10-08. It was previously missing because the reference
+    info.xml on docs.civicrm.org (org.wikimedia.geocoder) itself lists only
+    8.1-8.4 - that example is stale, not authoritative.
+
+    The 8.1 floor is deliberate and not negotiable: composer.json requires
+    php >=8.1 and PHPUnit 10.5 requires >=8.1. Dropping to 7.4 (which CiviCRM 5.x
+    supports) would mean dropping PHPUnit 10.
+
+    tools/preflight.sh asserts this list equals the CI matrix, because nothing
+    else keeps them in step - that drift is exactly how 8.5 went missing.
+  -->
   <php_compatibility>
     <ver>8.1</ver>
     <ver>8.2</ver>
     <ver>8.3</ver>
     <ver>8.4</ver>
+    <ver>8.5</ver>
   </php_compatibility>
   <smarty_compatibility>
     <ver>5</ver>

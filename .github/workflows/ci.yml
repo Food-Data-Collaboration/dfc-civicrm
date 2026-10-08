@@ -94,12 +94,20 @@ jobs:
         # the point: a PHP version a user might install is a version CI runs.
         #
         # The floor is 8.1 because composer.json requires ">=8.1" and PHPUnit
-        # 10.5 requires 8.1.
+        # 10.5 requires >=8.1.
+        #
+        # The ceiling tracks what <php_compatibility> in info.xml declares, and
+        # that element is a hard allow-list rather than a floor: CiviCRM's docs
+        # give <compatibility> forward-compatibility semantics but explicitly
+        # NOT <php_compatibility>, so a version absent here is a version the
+        # extension refuses. Adding a PHP release here AND to info.xml is the
+        # whole change; tools/preflight.sh fails the build if they diverge.
         php:
           - '8.1'
           - '8.2'
           - '8.3'
           - '8.4'
+          - '8.5'
 
     steps:
       - name: Check out the extension
@@ -209,8 +217,12 @@ jobs:
   # --------------------------------------------------------------------------
   # Coverage. Not a gate, and not published anywhere.
   # --------------------------------------------------------------------------
+  # Runs on the NEWEST declared PHP version, deliberately: coverage is only
+  # interesting on a version people will actually install, and pinning it to an
+  # older one measures code paths nobody runs. Keep this in step with the top of
+  # the matrix above; preflight.sh checks that too.
   coverage:
-    name: coverage / PHP 8.4
+    name: coverage / PHP 8.5
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: unit
@@ -222,7 +234,7 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2 (this repo tags releases without the v)
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           extensions: dom, json, libxml, mbstring
           tools: composer:v2, phpunit
           # Xdebug, so --coverage-clover has something to collect from.

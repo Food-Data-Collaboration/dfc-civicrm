@@ -140,6 +140,75 @@ else
     for m in ${mixins}; do
         info "mixin ${m}"
     done
+
+    # ---- PHP support must be declared, tested, and agreed --------------------
+    #
+    # <php_compatibility> is a hard allow-list, NOT a floor. CiviCRM's docs give
+    # <compatibility> (CiviCRM versions) forward-compatibility semantics and
+    # explicitly do NOT give it to <php_compatibility>: "Each <ver> child element
+    # should only contain a single compatible version of PHP" and "It is not
+    # currently possible to specify a 'maximum compatible version'."
+    #
+    # So a version missing from that list is a version this extension refuses to
+    # install on. 8.4 was silently acting as a ceiling until 2026-10-08, because
+    # the reference info.xml on docs.civicrm.org itself lists only 8.1-8.4.
+    #
+    # Three checks, because each file alone has lied before:
+    #   1. the declared list is non-empty and starts at the composer floor
+    #   2. the CI matrix is exactly the declared list
+    #   3. composer.json's constraint does not claim a higher floor
+    php_compat="$(php -r '$x=simplexml_load_file($argv[1]); $n=$x->php_compatibility->ver; if ($n) { foreach ($n as $v) { echo (string)$v, PHP_EOL; } }' "${REPO_ROOT}/info.xml")"
+    if [ -z "${php_compat}" ]; then
+        warn "info.xml declares no <php_compatibility>. CiviCRM introduced the element in 5.81, so on an older core the list is simply ignored."
+    else
+        declared_php="$(printf '%s\n' "${php_compat}" | sort -V | tr '\n' ' ')"
+        info "<php_compatibility>: ${declared_php}"
+        highest_declared="$(printf '%s\n' "${php_compat}" | sort -V | tail -n 1)"
+
+        composer_floor="$(php -r '
+            $d = json_decode((string) file_get_contents($argv[1]), true);
+            $c = $d["require"]["php"] ?? "";
+            if (preg_match("/(\d+)\.(\d+)/", $c, $m)) { echo $m[1] . "." . $m[2]; }
+        ' "${REPO_ROOT}/composer.json")"
+
+        if [ -n "${composer_floor}" ]; then
+            lowest_declared="$(printf '%s\n' "${php_compat}" | sort -V | head -n 1)"
+            if [ "$(printf '%s\n%s\n' "${composer_floor}" "${lowest_declared}" | sort -V | head -n 1)" = "${composer_floor}" ]; then
+                ok "composer.json floor (${composer_floor}) agrees with the declared list (${lowest_declared})"
+            else
+                fail "composer.json requires php ${composer_floor} but info.xml's lowest declared version is ${lowest_declared}. Composer would install on a version the extension then refuses."
+            fi
+        fi
+
+        # The CI matrix is parsed from the YAML rather than duplicated, so this
+        # check cannot itself drift out of date.
+        ci_php=""
+        if [ -f "${REPO_ROOT}/.github/workflows/ci.yml" ]; then
+            ci_php="$(awk '
+                /^[[:space:]]*php:[[:space:]]*$/ { inphp = 1; next }
+                inphp && /^[[:space:]]*-[[:space:]]*.8\./ {
+                    gsub(/[ '"'"'-]/, "", $0); print; next
+                }
+                inphp { inphp = 0 }
+            ' "${REPO_ROOT}/.github/workflows/ci.yml" | sort -V | uniq | tr '\n' ' ')"
+        fi
+
+        if [ -z "${ci_php}" ]; then
+            fail "could not read a php matrix from .github/workflows/ci.yml - cannot verify that declared support is actually tested"
+        elif [ "${ci_php}" = "${declared_php}" ]; then
+            ok "CI matrix tests exactly the declared PHP versions"
+        else
+            fail "PHP support is declared but not tested, or vice versa.
+       info.xml declares: ${declared_php}
+       CI matrix runs:   ${ci_php}
+     Every declared version must be tested, and every tested version declared -
+     a version in only one of the two is either an untested claim or untested code."
+        fi
+
+        if [ -n "${highest_declared}" ]; then
+            info "highest declared: ${highest_declared} (a hard ceiling - not a floor)"
+        fi
+    fi
 fi
 
 # --- 3. composer + dependency ---------------------------------------------
