@@ -46,28 +46,33 @@
   abstraction is handled in the adapter layer (per PRD-002), not as a route.
 
   ─────────────────────────────────────────────────────────────────────────
-  PATH PARAMETERS — THE INELEGANT BUT NECESSARY PART
+  PATH-STYLE URLs (BLK-020, decided 2026-10-08)
   ─────────────────────────────────────────────────────────────────────────
-  The contract uses OpenAPI path templates: /organizations/{organizationId}.
-  CiviCRM's route table is FLAT. Every core route uses a literal <path> and
-  passes values in the query string — see <path_arguments> in
-  CRM/Core/xml/Menu/Activity.xml. There is no portable cross-CMS syntax for a
-  "{id}" path segment.
+  RESOLVED: we serve real path-based URLs. CiviCRM's route table matches
+  sub-paths — the routing docs state "One path can match all sub-paths. For
+  example, <path>civicrm/admin</path> can match
+  http://example.org/civicrm/admin/f/o/o/b/a/r" — so the handlers below parse
+  the remainder themselves via Civi\Dfc\Http\SubPath\SubPath.
 
-  So we register one route per *shape* and take the identifier as a query
-  argument named exactly as the contract's parameter. Concretely:
-      contract  GET /organizations/awesome-farm/index
-      ours      GET /civicrm/dfc/v2/organizations?organizationId=awesome-farm
-  This is a documented divergence, not an oversight: it is what CiviCRM's
-  routing permits across all supported CMS environments, which is the packaging
-  property this extension is built on. Callers must translate. It is recorded as
-  an interoperability cost in PRD-002's risk table and is worth raising with the
-  DFC working group, since a DFC client written against the OpenAPI will not
-  work unmodified against any CiviCRM extension.
+  This was not cosmetic. The DFC data-storage-and-discovery specification makes
+  path-hierarchy containment normative: "if the resource `resource` is contained
+  in the container `https://platform.ex/container/`, this resource URI MUST be
+  `https://platform.ex/container/resource`". A query string is not in the path
+  hierarchy, so the earlier ?userId= form could not satisfy that MUST for any
+  ldp:contains member.
 
-  The `{...}/index` suffix is likewise dropped: it is a contract-level convention
-  for disambiguating a resource from its container, and carries no information a
-  CiviCRM route can use.
+  The docs caution that sub-path matching "is imprecise and it can be difficult
+  to integrate with some frontends". Accepted deliberately: this extension's
+  consumers are other DFC platforms, not CMS front ends. The one exception is
+  the onboarding web component (BLK-021), where CORS rather than path shape is
+  the constraint.
+
+  MUST BE VERIFIED on the CiviCRM box (BLK-005): that the sub-path reaches PHP
+  intact and identically under Drupal, WordPress and Joomla. Until then the
+  route shapes below are the design, not a tested fact.
+
+  The contract's "{...}/index" suffix is dropped — it disambiguates a resource
+  from its container and carries no information a handler can use.
 
   ─────────────────────────────────────────────────────────────────────────
   REQUIRED HEADER
@@ -128,11 +133,11 @@
   <!-- ==================================================================== -->
 
   <item>
-    <path>civicrm/dfc/v2/users/webid</path>
+    <path>civicrm/dfc/v2/users</path>
     <title>DFC User WebID</title>
     <desc>A single user's public WebID profile (contract path /users/{userId}/webid). Identify the user with the "userId" query argument. Links to the private preferences file and the private TypeIndex. Must be publicly readable and served as application/ld+json.</desc>
     <page_callback>Civi\Dfc\Http\Page\UserWebId</page_callback>
-    <page_arguments>userId</page_arguments>
+    <page_arguments>dfc_shape={userId}/webid</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
@@ -141,11 +146,11 @@
   </item>
 
   <item>
-    <path>civicrm/dfc/v2/users/prefs</path>
+    <path>civicrm/dfc/v2/users</path>
     <title>DFC User Preferences</title>
     <desc>The user's private preferences document (contract path /users/{userId}/prefs), linked from their WebID via pim:preferencesFile. Identify the user with the "userId" query argument. Private: never exported through the public allow-list.</desc>
     <page_callback>Civi\Dfc\Http\Page\UserPreferences</page_callback>
-    <page_arguments>userId</page_arguments>
+    <page_arguments>dfc_shape={userId}/prefs</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
@@ -154,11 +159,11 @@
   </item>
 
   <item>
-    <path>civicrm/dfc/v2/users/private-type-index</path>
+    <path>civicrm/dfc/v2/users</path>
     <title>DFC Private TypeIndex</title>
     <desc>The user's private TypeIndex (contract path /users/{userId}/privateTypeIndex), which associates the authenticated identity with its DFC Agent/Enterprise resource via solid:instance. Identify the user with the "userId" query argument. This is the document that ties an OIDC identity to a DFC Agent — the most security-sensitive read in the surface, and it must never disclose anything the export allow-list withholds.</desc>
     <page_callback>Civi\Dfc\Http\Page\PrivateTypeIndex</page_callback>
-    <page_arguments>userId</page_arguments>
+    <page_arguments>dfc_shape={userId}/privateTypeIndex</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
@@ -187,11 +192,11 @@
   </item>
 
   <item>
-    <path>civicrm/dfc/v2/organizations/resource</path>
+    <path>civicrm/dfc/v2/organizations</path>
     <title>DFC Organization</title>
     <desc>A single DFC Organization (contract path /organizations/{organizationId}, GET/PUT/PATCH). Identify the organization with the "organizationId" query argument. Native CiviCRM Contact with contact_type=Organization is the backing record; the DFC semantic @id comes from the identity map, never from the display name or the numeric CiviCRM id.</desc>
     <page_callback>Civi\Dfc\Http\Page\OrganizationResource</page_callback>
-    <page_arguments>organizationId</page_arguments>
+    <page_arguments>dfc_shape={organizationId}</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>
@@ -283,11 +288,11 @@
   <!-- ==================================================================== -->
 
   <item>
-    <path>civicrm/dfc/v2/persons/resource</path>
+    <path>civicrm/dfc/v2/persons</path>
     <title>DFC Person</title>
     <desc>A single DFC Person (contract path /persons/{personId}/index, GET/PUT/PATCH/DELETE). Identify the person with the "personId" query argument. Backing record is a native CiviCRM Contact with contact_type=Individual. Persons sit outside any Organization and have no container of their own in the contract.</desc>
     <page_callback>Civi\Dfc\Http\Page\PersonResource</page_callback>
-    <page_arguments>personId</page_arguments>
+    <page_arguments>dfc_shape={personId}/index</page_arguments>
     <access_callback>CRM_Core_Permission::checkMenu</access_callback>
     <access_arguments>access dfc api</access_arguments>
     <is_public>true</is_public>

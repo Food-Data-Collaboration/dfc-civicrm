@@ -47,19 +47,20 @@ final class RouteContractTest extends TestCase
         // Discovery
         'webid' => '/webid',
         'identity-service' => '/identity-service',
-        'users/webid' => '/users/{userId}/webid',
-        'users/prefs' => '/users/{userId}/prefs',
-        'users/private-type-index' => '/users/{userId}/privateTypeIndex',
+        // All three user documents are served by ONE wildcard route
+        // (civicrm/dfc/v2/users) and told apart by the dfc_shape argument. The
+        // mapping is therefore many-to-one, which this test no longer models as
+        // a simple key=>value lookup.
+        'users' => ['/users/{userId}/webid', '/users/{userId}/prefs', '/users/{userId}/privateTypeIndex'],
         // Organizations
-        'organizations' => '/organizations',
-        'organizations/resource' => '/organizations/{organizationId}',
+        'organizations' => ['/organizations', '/organizations/{organizationId}'],
         'organizations/addresses' => '/organizations/{organizationId}/addresses',
         'organizations/physical-places' => '/organizations/{organizationId}/physical-places',
         'organizations/affiliated-to' => '/organizations/{organizationId}/affiliated-to',
         'organizations/social-medias' => '/organizations/{organizationId}/social-medias',
         'organizations/customer-categories' => '/organizations/{organizationId}/customer-categories',
         // Individuals and flat resources
-        'persons/resource' => '/persons/{personId}/index',
+        'persons' => '/persons/{personId}/index',
         'phone-numbers' => '/phone-numbers/{phoneNumberId}/index',
     ];
 
@@ -179,10 +180,13 @@ final class RouteContractTest extends TestCase
     public function testEveryMappedContractPathActuallyExistsInTheContract(): void
     {
         $contract = $this->contractPaths();
-        $missing = array_values(array_diff(
-            array_values(self::ROUTE_TO_CONTRACT),
-            $contract
-        ));
+        $targets = [];
+        foreach (self::ROUTE_TO_CONTRACT as $targetsForRoute) {
+            foreach ((array) $targetsForRoute as $target) {
+                $targets[] = $target;
+            }
+        }
+        $missing = array_values(array_diff($targets, $contract));
 
         self::assertSame(
             [],
@@ -203,10 +207,18 @@ final class RouteContractTest extends TestCase
             $declared,
             'dfc-ldp.yaml has no /platform/webid - the platform WebID is served at /webid'
         );
+        // 'persons' IS now a declared route - but as the wildcard prefix that
+        // serves /persons/{personId}/index, NOT as a container. The distinction
+        // is the dfc_shape argument, so that is what gets asserted here.
         self::assertNotContains(
             'persons',
-            $declared,
+            $this->declaredContainerPaths(),
             'dfc-ldp.yaml has no /persons container - persons sit outside any organization'
+        );
+        self::assertContains(
+            'persons',
+            $declared,
+            'the /persons prefix must still be registered to serve /persons/{personId}/index'
         );
         self::assertNotContains(
             'places',
@@ -241,7 +253,12 @@ final class RouteContractTest extends TestCase
 
     public function testNoRouteIsDeclaredForAnOutOfScopeContractPath(): void
     {
-        $mappedTargets = array_values(self::ROUTE_TO_CONTRACT);
+        $mappedTargets = [];
+        foreach (self::ROUTE_TO_CONTRACT as $targetsForRoute) {
+            foreach ((array) $targetsForRoute as $target) {
+                $mappedTargets[] = $target;
+            }
+        }
         $offenders = array_values(array_intersect($mappedTargets, self::OUT_OF_SCOPE_CONTRACT_PATHS));
 
         self::assertSame([], $offenders);
@@ -310,13 +327,99 @@ final class RouteContractTest extends TestCase
         self::assertSame([], $missing, 'all page classes exist');
     }
 
-    public function testTheMenuDeclaresNoDuplicatePaths(): void
+    /**
+     * Duplicate <path> values are now EXPECTED and required.
+     *
+     * BLK-020 moved us to CiviCRM wildcard sub-path matching, so several routes
+     * deliberately share one prefix - three under civicrm/dfc/v2/users, two under
+     * civicrm/dfc/v2/organizations. What must be unique is the (path, dfc_shape)
+     * pair: two routes with the same prefix AND the same shape would be two
+     * civicrm_menu rows competing for one request.
+     */
+    public function testEveryRouteIsUniquelyIdentifiedByPathAndShape(): void
     {
-        $paths = $this->declaredPaths();
-        self::assertSame(
-            count($paths),
-            count(array_unique($paths)),
-            'a duplicate <path> produces two civicrm_menu rows and an ambiguous route table'
-        );
+        $seen = [];
+        foreach ($this->menu->item as $item) {
+            $key = (string) $item->path . "\0" . (string) $item->page_arguments;
+            self::assertArrayNotHasKey(
+                $key,
+                $seen,
+                'two routes share a path AND a dfc_shape (' . (string) $item->path
+                . '), so which one handles a request is ambiguous'
+            );
+            $seen[$key] = true;
+        }
+    }
+
+    /**
+     * @return list<string> paths declared as LDP containers
+     */
+    private function declaredContainerPaths(): array
+    {
+        $paths = [];
+        foreach ($this->menu->item as $item) {
+            if (str_contains((string) $item->page_arguments, 'dfc_container=')) {
+                $paths[] = str_replace(self::ROUTE_PREFIX . '/', '', (string) $item->path);
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * Every shared prefix must be distinguishable from the sub-path alone.
+     *
+     * Two routes can share a prefix legitimately in two different ways:
+     *  - both are dfc_shape routes, distinguished by the shape;
+     *  - one is a dfc_container route (the bare prefix IS the container, so the
+     *    sub-path is empty) and the other is a dfc_shape route (a non-empty
+     *    sub-path). The empty/non-empty distinction does the work, so a
+     *    container route legitimately has no dfc_shape.
+     *
+     * What must never happen is two routes on one prefix that are
+     * indistinguishable once the sub-path is known.
+     */
+    public function testSharedPrefixesAreAlwaysDistinguishable(): void
+    {
+        $byPath = [];
+        foreach ($this->menu->item as $item) {
+            $byPath[(string) $item->path][] = (string) $item->page_arguments;
+        }
+
+        foreach ($byPath as $path => $args) {
+            if (count($args) < 2) {
+                continue;
+            }
+
+            $shapes = array_values(array_filter(
+                $args,
+                static fn (string $a): bool => str_starts_with($a, 'dfc_shape=')
+            ));
+            $containers = array_values(array_filter(
+                $args,
+                static fn (string $a): bool => str_starts_with($a, 'dfc_container=')
+            ));
+
+            self::assertLessThanOrEqual(
+                1,
+                count($containers),
+                'route ' . $path . ' declares more than one dfc_container; a prefix can be '
+                . 'either a container or a set of shapes, never both as containers'
+            );
+
+            if ($containers !== []) {
+                // The container answers only for an EMPTY sub-path, which is
+                // unambiguous against any dfc_shape (those all consume >=1
+                // segment). Nothing more to assert.
+                continue;
+            }
+
+            self::assertSame(
+                count($args),
+                count(array_unique($shapes)),
+                'route ' . $path . ' shares its prefix but two of its routes declare the '
+                . 'same dfc_shape, so a request cannot be dispatched'
+            );
+        }
     }
 }
